@@ -2,6 +2,7 @@
   "name": "tcgindextracker-data",
   "private": true,
   "version": "0.1.0",
+  "license": "LicenseRef-PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "scripts": {
     "download:data": "node scripts/download-cardmarket-data.js",

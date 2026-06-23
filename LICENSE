@@ -1,0 +1,66 @@
+TCG Index Tracker Data Repository License
+
+Copyright (c) 2026 TCG Index Tracker
+
+This repository is source-available for non-commercial use. It is not
+licensed for commercial use unless you receive separate written permission
+from the repository owner.
+
+Different parts of this repository are licensed as follows:
+
+1. Source code
+
+Source code, scripts, workflow files, tests, and configuration files are
+licensed under the PolyForm Noncommercial License 1.0.0.
+
+License text:
+https://polyformproject.org/licenses/noncommercial/1.0.0/
+
+2. Data and documentation
+
+Generated JSON data, universe files, index history files, documentation, and
+other written material are licensed under the Creative Commons
+Attribution-NonCommercial 4.0 International License.
+
+License text:
+https://creativecommons.org/licenses/by-nc/4.0/legalcode
+
+3. Attribution and notices
+
+If you share, copy, mirror, redistribute, or publish any substantial part of
+the licensed material, you must keep attribution to TCG Index Tracker, include
+this license notice or a link to it, and indicate if you changed the material.
+
+You may not imply that TCG Index Tracker endorses your project, product,
+analysis, or use of the data.
+
+4. Commercial use
+
+Commercial use is not allowed under either license above. This includes, but
+is not limited to, resale, paid redistribution, use in a paid product, use in a
+paid API or dataset, use inside a commercial analytics service, or use in a
+business workflow.
+
+For commercial licensing or written permission, contact the repository owner.
+
+5. Third-party rights
+
+This license only covers rights that TCG Index Tracker can license. It does
+not grant any rights in Cardmarket source files, third-party trademarks, card
+names, game names, logos, artwork, images, or other material owned by third
+parties.
+
+Cardmarket source files are not included in this repository and are not
+licensed by this notice.
+
+6. No warranty
+
+This repository and the generated data are provided as-is, without warranty of
+any kind. The data may be incomplete, delayed, inaccurate, unavailable, or
+changed without notice.
+
+7. No affiliation
+
+This project is not affiliated with or endorsed by Cardmarket, Pokemon,
+Nintendo, Creatures, GAME FREAK, Wizards of the Coast, Konami, or any other
+rights holder.
