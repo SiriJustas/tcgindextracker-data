@@ -1,0 +1,11 @@
+downloads/
+tmp/
+public/data/
+.index-state/
+audit/
+*.csv
+*.xml
+*.zip
+*.gz
+node_modules/
+.DS_Store

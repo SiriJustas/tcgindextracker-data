@@ -1,0 +1,14 @@
+{
+  "name": "tcgindextracker-data",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "download:data": "node scripts/download-cardmarket-data.js",
+    "generate:data": "node scripts/generate-data.js",
+    "test": "vitest run scripts"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  }
+}

@@ -1,0 +1,153 @@
+name: Update and publish index data
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 8,12,16,20 * * *"
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate scripts
+        run: |
+          node --check scripts/cardmarket-sources.js
+          node --check scripts/check-price-guide-fresh.js
+          node --check scripts/check-update-needed.js
+          node --check scripts/download-cardmarket-data.js
+          node --check scripts/generate-data.js
+          node --check scripts/index-engine.js
+          node --check scripts/update-checks.js
+
+      - name: Check if today's data is already published
+        id: update-needed
+        run: node scripts/check-update-needed.js
+
+      - name: Download Cardmarket files
+        if: steps.update-needed.outputs.needed == 'true'
+        run: node scripts/download-cardmarket-data.js
+
+      - name: Check downloaded price guide freshness
+        id: price-guide
+        if: steps.update-needed.outputs.needed == 'true'
+        run: node scripts/check-price-guide-fresh.js
+
+      - name: Generate compact JSON
+        if: steps.update-needed.outputs.needed == 'true' && steps.price-guide.outputs.fresh == 'true'
+        run: npm run generate:data
+
+      - name: Validate generated data
+        if: steps.update-needed.outputs.needed == 'true' && steps.price-guide.outputs.fresh == 'true'
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const requiredFiles = [
+            "public/data/pokemon/manifest.json",
+            "public/data/pokemon/summary.json",
+            "public/data/pokemon/indexes/global-singles-equal.json",
+            "public/data/pokemon/indexes/global-singles-market.json",
+            "public/data/pokemon/indexes/booster-boxes-equal.json",
+            "public/data/pokemon/indexes/booster-boxes-market.json",
+            "public/data/pokemon/indexes/booster-packs-equal.json",
+            "public/data/pokemon/indexes/booster-packs-market.json",
+            "public/data/pokemon/indexes/global-singles-universe.json",
+            "public/data/pokemon/indexes/booster-boxes-universe.json",
+            "public/data/pokemon/indexes/booster-packs-universe.json",
+          ];
+
+          const windowsAbsolutePath = /[A-Za-z]:[\\/]/;
+          const unixHomePath = /\/home\/[^/\s"]+\//;
+          const macHomePath = /\/u(?:sers)\/[^/\s"]+\//i;
+
+          function readJson(file) {
+            if (!fs.existsSync(file)) {
+              throw new Error(`Missing required generated file: ${file}`);
+            }
+            const text = fs.readFileSync(file, "utf8");
+            if (windowsAbsolutePath.test(text) || unixHomePath.test(text) || macHomePath.test(text)) {
+              throw new Error(`Local filesystem path found in ${file}`);
+            }
+            const data = JSON.parse(text);
+            assertNoDemoKeys(data, file);
+            return data;
+          }
+
+          function assertNoDemoKeys(value, file) {
+            if (!value || typeof value !== "object") return;
+            for (const [key, child] of Object.entries(value)) {
+              if (/^demo/i.test(key)) {
+                throw new Error(`Demo metadata key found in ${file}`);
+              }
+              assertNoDemoKeys(child, file);
+            }
+          }
+
+          for (const file of requiredFiles) readJson(file);
+
+          const manifest = readJson("public/data/pokemon/manifest.json");
+          if (!Array.isArray(manifest.indexes) || manifest.indexes.length !== 6) {
+            throw new Error("manifest.json must list exactly six indexes");
+          }
+
+          const summary = readJson("public/data/pokemon/summary.json");
+          if (!Array.isArray(summary.indexes) || summary.indexes.length !== 6) {
+            throw new Error("summary.json must list exactly six indexes");
+          }
+
+          const indexDir = "public/data/pokemon/indexes";
+          for (const name of fs.readdirSync(indexDir)) {
+            if (name.endsWith(".json")) readJson(path.join(indexDir, name));
+          }
+          NODE
+
+      - name: Commit generated data
+        id: commit
+        if: steps.update-needed.outputs.needed == 'true' && steps.price-guide.outputs.fresh == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f public/data .index-state/state.json
+          if [ -d audit ]; then
+            git add -f audit
+          fi
+          if git diff --cached --quiet; then
+            echo "No generated data changes to commit"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "UPD: TCG index data."
+            git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure GitHub Pages
+        if: steps.commit.outputs.changed == 'true'
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        if: steps.commit.outputs.changed == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - name: Deploy to GitHub Pages
+        if: steps.commit.outputs.changed == 'true'
+        uses: actions/deploy-pages@v4
