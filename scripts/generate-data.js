@@ -3,12 +3,16 @@ import path from "node:path";
 import {
   INDEX_DEFINITIONS,
   PRODUCT_UNIVERSES,
+  SINGLES_METRICS,
   activeProductsByMetric,
   assertFreshPriceGuide,
   auditPokemonProducts,
   buildBaseProductsFromSnapshot,
+  buildFixedMetricRebalanceState,
   buildIndicatorFile,
+  buildMetricBaseProductsFromSnapshot,
   buildUniverseFile,
+  createFixedUniverseSnapshot,
   createSnapshot,
   ensureBaseState,
   buildRebalanceScale,
@@ -39,6 +43,7 @@ const pricesPath = args.prices ?? defaults.prices;
 const outDir = args.outDir ? path.resolve(args.outDir) : defaults.outDir;
 const statePath = args.statePath ? path.resolve(args.statePath) : defaults.statePath;
 const allowStalePrices = Boolean(args["allow-stale-prices"]);
+const setsOnly = Boolean(args["sets-only"]);
 const tcg = "pokemon";
 const tcgOutDir = path.join(outDir, tcg);
 const indexesDir = path.join(tcgOutDir, "indexes");
@@ -54,20 +59,23 @@ const sourcePayloads = {
   nonSingles: nonSinglesPayload,
 };
 const previousUniverses = normalizeUniverseState(previousState);
-const nextUniverses = {};
+const nextUniverses = setsOnly ? { ...previousUniverses } : {};
 const universeSnapshots = {};
 
 await mkdir(indexesDir, { recursive: true });
 await mkdir(indicatorsDir, { recursive: true });
 await mkdir(path.dirname(statePath), { recursive: true });
 
-const summary = {
+const existingSummary = setsOnly ? await readOptionalJson(path.join(tcgOutDir, "summary.json"), null) : null;
+const existingManifest = setsOnly ? await readOptionalJson(path.join(tcgOutDir, "manifest.json"), null) : null;
+
+const summary = existingSummary ?? {
   updatedAt: valuationDate,
   indexes: [],
   indicators: [],
 };
 
-const manifest = {
+const manifest = existingManifest ?? {
   updatedAt: valuationDate,
   version: Number(valuationDate.replaceAll("-", "")),
   indexes: INDEX_DEFINITIONS.map(({ id, name, file, description, metrics }) => ({ id, name, file, description, metrics })),
@@ -89,7 +97,17 @@ const manifest = {
   ],
 };
 
-for (const universe of PRODUCT_UNIVERSES) {
+const setUniverseFiles = await readSetUniverseFiles(indexesDir);
+const setIndexDefinitions = setUniverseFiles.flatMap((setUniverse) => buildSetIndexDefinitions(setUniverse));
+const setIndicatorDefinitions = setUniverseFiles.map((setUniverse) => buildSetIndicatorDefinition(setUniverse));
+const setIndexIds = new Set(setIndexDefinitions.map((definition) => definition.id));
+const setIndicatorIds = new Set(setIndicatorDefinitions.map((definition) => definition.id));
+manifest.indexes = (manifest.indexes ?? []).filter((index) => !setIndexIds.has(index.id));
+manifest.indicators = (manifest.indicators ?? []).filter((indicator) => !setIndicatorIds.has(indicator.id));
+summary.indexes = (summary.indexes ?? []).filter((index) => !setIndexIds.has(index.id));
+summary.indicators = (summary.indicators ?? []).filter((indicator) => !setIndicatorIds.has(indicator.id));
+
+if (!setsOnly) for (const universe of PRODUCT_UNIVERSES) {
   const metrics = universe.metrics;
   const audit = auditPokemonProducts(sourcePayloads[universe.source], universe);
   const rows = joinPokemonProducts(sourcePayloads[universe.source], priceGuidePayload, universe);
@@ -181,7 +199,7 @@ for (const universe of PRODUCT_UNIVERSES) {
   }
 }
 
-for (const universe of PRODUCT_UNIVERSES) {
+if (!setsOnly) for (const universe of PRODUCT_UNIVERSES) {
   const universeData = universeSnapshots[universe.id];
   const universeFile = buildUniverseFile({
     universe,
@@ -194,7 +212,7 @@ for (const universe of PRODUCT_UNIVERSES) {
   await writeCompactJson(path.join(indexesDir, `${universeFile.id}.json`), universeFile);
 }
 
-for (const definition of INDEX_DEFINITIONS) {
+if (!setsOnly) for (const definition of INDEX_DEFINITIONS) {
   const universe = PRODUCT_UNIVERSES.find((item) => item.id === definition.universeId);
   const metrics = universe.metrics;
   const universeData = universeSnapshots[definition.universeId];
@@ -271,7 +289,7 @@ for (const definition of INDEX_DEFINITIONS) {
   });
 }
 
-for (const universe of PRODUCT_UNIVERSES) {
+if (!setsOnly) for (const universe of PRODUCT_UNIVERSES) {
   const universeData = universeSnapshots[universe.id];
   const indicatorPath = path.join(indicatorsDir, `${universe.id}.json`);
   const existingIndicator = await readOptionalJson(indicatorPath, null);
@@ -300,6 +318,143 @@ for (const universe of PRODUCT_UNIVERSES) {
     change30d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 30)])),
   });
 }
+
+for (const setUniverse of setUniverseFiles) {
+  const universe = setUniverseToProductUniverse(setUniverse);
+  const rows = fixedSetRows(setUniverse, priceGuidePayload);
+  const previousUniverseState = previousUniverses[universe.id] ?? { products: {}, productMeta: {}, baseProducts: {} };
+  const previousBaseProducts = previousUniverseState.baseProducts ?? {};
+  const snapshotData = createFixedUniverseSnapshot(rows, previousUniverseState, previousBaseProducts, SINGLES_METRICS);
+  const productMeta = snapshotData.state.productMeta;
+  const previousScaleByMethodMetric = normalizeScaleByMethodMetric(previousUniverseState.scaleByMethodMetric, SINGLES_METRICS);
+  const initialState =
+    hasAnyMetricBaseProducts(previousBaseProducts, SINGLES_METRICS)
+      ? buildFixedMetricRebalanceState({
+          snapshot: snapshotData.snapshot,
+          previousBaseProducts,
+          previousScaleByMethodMetric,
+          metrics: SINGLES_METRICS,
+          valuationDate,
+          productMeta,
+        })
+      : {
+          baseProducts: buildMetricBaseProductsFromSnapshot(snapshotData.snapshot, SINGLES_METRICS),
+          scaleByMethodMetric: previousScaleByMethodMetric,
+          metricRebalances: {},
+        };
+  const baseProducts = initialState.baseProducts;
+  const scaleByMethodMetric = initialState.scaleByMethodMetric;
+  const metricRebalances = initialState.metricRebalances;
+  const activeByMetric = activeProductsByMetric(baseProducts, SINGLES_METRICS);
+  for (const metric of SINGLES_METRICS) {
+    snapshotData.quality[metric].activeProducts = activeByMetric[metric];
+  }
+  const baseDate = previousUniverseState.baseDate ?? valuationDate;
+  const rebalances = upsertMetricRebalances(previousUniverseState.rebalances ?? [], valuationDate, metricRebalances);
+
+  nextUniverses[universe.id] = {
+    products: snapshotData.state.products,
+    productMeta,
+    baseProducts,
+    metrics: SINGLES_METRICS,
+    baseDate,
+    lastRebalancedAt: Object.keys(metricRebalances).length > 0 ? valuationDate : previousUniverseState.lastRebalancedAt,
+    scaleByMethodMetric,
+    rebalancePolicy: universe.rebalancePolicy,
+    rebalances,
+  };
+
+  for (const definition of buildSetIndexDefinitions(setUniverse)) {
+    const indexPath = path.join(indexesDir, `${definition.id}.json`);
+    const existing = await readOptionalJson(indexPath, null);
+    const existingCompatible = arraysEqual(existing?.metrics, SINGLES_METRICS) ? existing : null;
+    const point = buildScaledPoint(
+      definition.method,
+      valuationDate,
+      snapshotData.snapshot,
+      baseProducts,
+      scaleByMethodMetric[definition.method],
+      SINGLES_METRICS,
+    );
+    const points = upsertPoint(existingCompatible?.points ?? [], point);
+    const diagnostics = {
+      ...(existingCompatible?.diagnostics ?? {}),
+      [valuationDate]: {
+        sourceCreatedAt: {
+          products: setUniverse.source?.productsCreatedAt ?? null,
+          prices: priceGuidePayload.createdAt,
+        },
+        quality: snapshotData.quality,
+        rebalance: Object.keys(metricRebalances).length > 0,
+        metricRebalances,
+      },
+    };
+    const output = {
+      id: definition.id,
+      name: definition.name,
+      currency: "EUR",
+      baseDate: existingCompatible?.baseDate ?? valuationDate,
+      baseValue: 100,
+      updatedAt: valuationDate,
+      metrics: SINGLES_METRICS,
+      composition: {
+        universe: universe.id,
+        universePolicy: universe.rebalancePolicy,
+        universeFile: universe.universeFile,
+        method: definition.method,
+        currentBaseDate: baseDate,
+        matchedProducts: setUniverse.count,
+        activeProductsByMetric: activeByMetric,
+        missingProductsByMetric: Object.fromEntries(SINGLES_METRICS.map((metric) => [metric, Math.max(setUniverse.count - activeByMetric[metric], 0)])),
+      },
+      diagnostics,
+      points,
+    };
+    await writeCompactJson(indexPath, output);
+
+    const latest = points.at(-1);
+    summary.indexes.push({
+      id: definition.id,
+      name: definition.name,
+      file: definition.file,
+      metrics: SINGLES_METRICS,
+      latest: Object.fromEntries(SINGLES_METRICS.map((metric, index) => [metric, latest?.[index + 1] ?? null])),
+      change1d: Object.fromEntries(SINGLES_METRICS.map((metric, index) => [metric, percentChange(points, index + 1, 1)])),
+      change7d: Object.fromEntries(SINGLES_METRICS.map((metric, index) => [metric, percentChange(points, index + 1, 7)])),
+      change30d: Object.fromEntries(SINGLES_METRICS.map((metric, index) => [metric, percentChange(points, index + 1, 30)])),
+      quality: snapshotData.quality,
+    });
+  }
+
+  const indicatorPath = path.join(indicatorsDir, `${universe.id}.json`);
+  const existingIndicator = await readOptionalJson(indicatorPath, null);
+  const indicatorFile = buildIndicatorFile({
+    universe,
+    updatedAt: valuationDate,
+    baseDate,
+    snapshot: snapshotData.snapshot,
+    baseProducts,
+    existing: existingIndicator,
+    rebalanceEvent: Object.keys(metricRebalances).length > 0 ? { date: valuationDate, metrics: metricRebalances } : null,
+    rebalances,
+  });
+  await writeCompactJson(indicatorPath, indicatorFile);
+  const latestIndicator = indicatorFile.points.at(-1);
+  summary.indicators.push({
+    id: indicatorFile.id,
+    name: indicatorFile.name,
+    universe: indicatorFile.universe,
+    file: `/data/pokemon/indicators/${universe.id}.json`,
+    metrics: indicatorFile.metrics,
+    latest: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, latestIndicator?.[index + 1] ?? null])),
+    change1d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 1)])),
+    change7d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 7)])),
+    change30d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 30)])),
+  });
+}
+
+manifest.indexes.push(...setIndexDefinitions.map(({ id, name, file, description, metrics }) => ({ id, name, file, description, metrics })));
+manifest.indicators.push(...setIndicatorDefinitions);
 
 await writeCompactJson(path.join(tcgOutDir, "manifest.json"), manifest);
 await writeCompactJson(path.join(tcgOutDir, "summary.json"), summary);
@@ -370,4 +525,88 @@ function upsertRebalanceEvent(events, event) {
 
 function arraysEqual(left, right) {
   return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+async function readSetUniverseFiles(indexesDir) {
+  const manifest = await readOptionalJson(path.join(indexesDir, "set-singles-universes-manifest.json"), { sets: [] });
+  const sets = [];
+  for (const set of manifest.sets ?? []) {
+    const fileName = path.basename(set.file);
+    sets.push(await readJson(path.join(indexesDir, fileName)));
+  }
+  return sets;
+}
+
+function setUniverseToProductUniverse(setUniverse) {
+  return {
+    id: `${setUniverse.slug}-singles`,
+    name: `${setUniverse.name} Singles`,
+    metrics: SINGLES_METRICS,
+    rebalancePolicy: "fixed-curated",
+    universeFile: `/data/pokemon/indexes/${setUniverse.slug}-singles-universe.json`,
+  };
+}
+
+function buildSetIndexDefinitions(setUniverse) {
+  const universe = setUniverseToProductUniverse(setUniverse);
+  return [
+    {
+      id: `${universe.id}-equal`,
+      name: `${universe.name} Equal Weight`,
+      method: "equal",
+      universeId: universe.id,
+      metrics: SINGLES_METRICS,
+      file: `/data/pokemon/indexes/${universe.id}-equal.json`,
+      description: `Each priced ${setUniverse.name} single contributes equally to percent movement.`,
+    },
+    {
+      id: `${universe.id}-market`,
+      name: `${universe.name} Market Weight`,
+      method: "market",
+      universeId: universe.id,
+      metrics: SINGLES_METRICS,
+      file: `/data/pokemon/indexes/${universe.id}-market.json`,
+      description: `Tracks total value movement across priced ${setUniverse.name} singles.`,
+    },
+  ];
+}
+
+function buildSetIndicatorDefinition(setUniverse) {
+  const universe = setUniverseToProductUniverse(setUniverse);
+  return {
+    id: universe.id,
+    name: `${universe.name} Market Indicators`,
+    universe: universe.id,
+    file: `/data/pokemon/indicators/${universe.id}.json`,
+    metrics: indicatorMetricsForUniverse(universe),
+  };
+}
+
+function fixedSetRows(setUniverse, priceGuidePayload) {
+  const priceGuides = Array.isArray(priceGuidePayload?.priceGuides) ? priceGuidePayload.priceGuides : [];
+  const pricesByProduct = new Map(priceGuides.map((price) => [String(price.idProduct), price]));
+  return Object.entries(setUniverse.entries ?? {}).map(([idProduct, name]) => ({
+    product: {
+      idProduct: Number(idProduct),
+      name,
+      categoryName: "Pokemon Single",
+    },
+    price: pricesByProduct.get(idProduct),
+  }));
+}
+
+function hasAnyMetricBaseProducts(baseProducts, metrics) {
+  return Object.values(baseProducts ?? {}).some((prices) => metrics.some((metric) => typeof prices?.[metric] === "number"));
+}
+
+function upsertMetricRebalances(events, date, metricRebalances) {
+  const metrics = Object.keys(metricRebalances);
+  if (metrics.length === 0) return events;
+  return [
+    ...events.filter((event) => event.date !== date),
+    {
+      date,
+      metrics: metricRebalances,
+    },
+  ].sort((left, right) => left.date.localeCompare(right.date));
 }

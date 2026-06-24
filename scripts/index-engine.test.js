@@ -11,10 +11,13 @@ import {
   buildIndicatorFile,
   buildIndicatorPoint,
   buildBaseProductsFromSnapshot,
+  buildFixedMetricRebalanceState,
+  buildMetricBaseProductsFromSnapshot,
   buildUniverseFile,
   buildPoint,
   buildRebalanceScale,
   buildScaledPoint,
+  createFixedUniverseSnapshot,
   createSnapshot,
   ensureBaseState,
   isBoosterBoxDisplay,
@@ -344,6 +347,81 @@ describe("index engine", () => {
       removed: 1,
       excludedMissingAtRebalance: 2,
     });
+  });
+
+  it("builds fixed universe metric bases independently per metric", () => {
+    const { snapshot, quality } = createFixedUniverseSnapshot(
+      [
+        { product: { idProduct: 1, name: "One" }, price: { avg1: 10, avg7: 11, avg30: 12, avg: 13, low: 8, trend: 9 } },
+        { product: { idProduct: 2, name: "Two" }, price: { avg1: 20, avg7: 21, avg30: 22, avg: null, low: 18, trend: 19 } },
+      ],
+      {},
+      {},
+      SINGLES_METRICS,
+    );
+
+    expect(buildMetricBaseProductsFromSnapshot(snapshot, SINGLES_METRICS)).toEqual({
+      1: { avg1: 10, avg7: 11, avg30: 12, avg: 13, low: 8, trend: 9 },
+      2: { avg1: 20, avg7: 21, avg30: 22, low: 18, trend: 19 },
+    });
+    expect(quality.avg.pricedProducts).toBe(1);
+    expect(quality.avg.missing).toBe(1);
+    expect(quality.avg1.pricedProducts).toBe(2);
+  });
+
+  it("rebalances fixed set metrics when the active product id set changes, even if the count is unchanged", () => {
+    const previousBaseProducts = {
+      1: { avg: 10 },
+      2: { avg: 20 },
+    };
+    const snapshot = {
+      1: { avg: 11 },
+      2: {},
+      3: { avg: 30 },
+    };
+
+    const state = buildFixedMetricRebalanceState({
+      snapshot,
+      previousBaseProducts,
+      previousScaleByMethodMetric: { equal: { avg: 100 }, market: { avg: 100 } },
+      metrics: ["avg"],
+      valuationDate: "2026-06-24",
+      productMeta: {
+        1: { name: "One" },
+        2: { name: "Two" },
+        3: { name: "Three" },
+      },
+    });
+
+    expect(state.metricRebalances.avg.previous).toBe(2);
+    expect(state.metricRebalances.avg.next).toBe(2);
+    expect(state.metricRebalances.avg.added).toEqual([{ idProduct: 3, name: "Three" }]);
+    expect(state.metricRebalances.avg.removed).toEqual([{ idProduct: 2, name: "Two" }]);
+    expect(state.baseProducts).toEqual({ 1: { avg: 11 }, 3: { avg: 30 } });
+    expect(buildScaledPoint("equal", "2026-06-24", snapshot, state.baseProducts, state.scaleByMethodMetric.equal, ["avg"])[1]).toBe(110);
+  });
+
+  it("does not rebalance fixed set metrics when only prices change", () => {
+    const previousBaseProducts = {
+      1: { avg: 10 },
+      2: { avg: 20 },
+    };
+    const snapshot = {
+      1: { avg: 11 },
+      2: { avg: 22 },
+    };
+
+    const state = buildFixedMetricRebalanceState({
+      snapshot,
+      previousBaseProducts,
+      previousScaleByMethodMetric: { equal: { avg: 100 }, market: { avg: 100 } },
+      metrics: ["avg"],
+      valuationDate: "2026-06-24",
+    });
+
+    expect(state.metricRebalances).toEqual({});
+    expect(state.baseProducts).toEqual(previousBaseProducts);
+    expect(buildScaledPoint("equal", "2026-06-24", snapshot, state.baseProducts, state.scaleByMethodMetric.equal, ["avg"])[1]).toBe(110);
   });
 
   it("upserts same-day points and calculates percent changes", () => {

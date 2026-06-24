@@ -70,6 +70,7 @@ export const INDEX_DEFINITIONS = PRODUCT_UNIVERSES.flatMap((universe) =>
 );
 
 export function universeFilePath(universe) {
+  if (universe.universeFile) return universe.universeFile;
   return `/data/pokemon/indexes/${universe.universeSlug}-universe.json`;
 }
 
@@ -262,6 +263,60 @@ export function createSnapshot(rows, previousState = {}, baseProducts = null, me
   return { snapshot, state: { products: nextProducts, productMeta: nextProductMeta }, quality };
 }
 
+export function createFixedUniverseSnapshot(rows, previousState = {}, baseProducts = {}, metrics = SINGLES_METRICS) {
+  const productState = previousState.products ?? {};
+  const productMeta = previousState.productMeta ?? {};
+  const snapshot = {};
+  const nextProducts = {};
+  const nextProductMeta = {};
+  const quality = Object.fromEntries(
+    metrics.map((metric) => [
+      metric,
+      {
+        matchedProducts: rows.length,
+        pricedProducts: 0,
+        missing: 0,
+        carried: 0,
+        activeProducts: 0,
+        unavailable: 0,
+      },
+    ]),
+  );
+
+  for (const row of rows) {
+    const id = String(row.product.idProduct);
+    snapshot[id] = {};
+    nextProducts[id] = {};
+    nextProductMeta[id] = compactProductMeta(row.product);
+
+    for (const metric of metrics) {
+      const freshValue = readPrice(row.price?.[metric]);
+      if (freshValue !== null) {
+        snapshot[id][metric] = freshValue;
+        nextProducts[id][metric] = freshValue;
+        quality[metric].pricedProducts += 1;
+        continue;
+      }
+
+      quality[metric].missing += 1;
+      if (!row.price) {
+        quality[metric].unavailable += 1;
+      }
+
+      if (readPrice(baseProducts[id]?.[metric]) !== null) {
+        const carriedValue = readPrice(productState[id]?.[metric]);
+        if (carriedValue !== null) {
+          snapshot[id][metric] = carriedValue;
+          nextProducts[id][metric] = carriedValue;
+          quality[metric].carried += 1;
+        }
+      }
+    }
+  }
+
+  return { snapshot, state: { products: nextProducts, productMeta: { ...productMeta, ...nextProductMeta } }, quality };
+}
+
 function carryForwardProductMetric({ snapshot, nextProducts, productState, id, metric, quality }) {
   const carriedValue = readPrice(productState[id]?.[metric]);
   if (carriedValue !== null) {
@@ -318,6 +373,18 @@ export function buildBaseProductsFromSnapshot(snapshot, metrics = SINGLES_METRIC
       metricPrices[metric] = readPrice(prices[metric]);
     }
     baseProducts[id] = metricPrices;
+  }
+  return baseProducts;
+}
+
+export function buildMetricBaseProductsFromSnapshot(snapshot, metrics = SINGLES_METRICS) {
+  const baseProducts = {};
+  for (const [id, prices] of Object.entries(snapshot)) {
+    for (const metric of metrics) {
+      const value = readPrice(prices?.[metric]);
+      if (value === null) continue;
+      baseProducts[id] = { ...(baseProducts[id] ?? {}), [metric]: value };
+    }
   }
   return baseProducts;
 }
@@ -412,6 +479,83 @@ export function buildRebalanceScale(previousScaleByMethodMetric, oldSnapshot, ol
   );
 }
 
+export function buildFixedMetricRebalanceState({
+  snapshot,
+  previousBaseProducts = {},
+  previousScaleByMethodMetric = {},
+  metrics = SINGLES_METRICS,
+  valuationDate,
+  productMeta = {},
+}) {
+  const previousScale = normalizeScaleByMethodMetric(previousScaleByMethodMetric, metrics);
+  const nextScale = normalizeScaleByMethodMetric(previousScaleByMethodMetric, metrics);
+  const nextBaseProducts = {};
+  const metricRebalances = {};
+
+  for (const metric of metrics) {
+    const previousIds = idsWithMetric(previousBaseProducts, metric);
+    const nextIds = idsWithMetric(snapshot, metric);
+    const idsChanged = !sameSortedIds(previousIds, nextIds);
+
+    if (previousIds.length > 0 && idsChanged) {
+      const previousMetricBase = metricOnlyBaseProducts(previousBaseProducts, metric, previousIds);
+      for (const { method } of INDEX_METHODS) {
+        nextScale[method][metric] =
+          calculateScaledMetricValue(method, snapshot, previousMetricBase, metric, previousScale[method][metric]) ?? previousScale[method][metric];
+      }
+      metricRebalances[metric] = {
+        date: valuationDate,
+        previous: previousIds.length,
+        next: nextIds.length,
+        added: describeMetricIds(nextIds.filter((id) => !previousIds.includes(id)), productMeta),
+        removed: describeMetricIds(previousIds.filter((id) => !nextIds.includes(id)), productMeta),
+        missingExcluded: describeMetricIds(Object.keys(snapshot).filter((id) => !nextIds.includes(id)), productMeta),
+      };
+    }
+
+    const baseSource = previousIds.length === 0 || idsChanged ? snapshot : previousBaseProducts;
+    for (const id of nextIds) {
+      const value = readPrice(baseSource[id]?.[metric]);
+      if (value !== null) {
+        nextBaseProducts[id] = { ...(nextBaseProducts[id] ?? {}), [metric]: value };
+      }
+    }
+  }
+
+  return {
+    baseProducts: nextBaseProducts,
+    scaleByMethodMetric: nextScale,
+    metricRebalances,
+  };
+}
+
+function idsWithMetric(products, metric) {
+  return Object.entries(products ?? {})
+    .filter(([, prices]) => readPrice(prices?.[metric]) !== null)
+    .map(([id]) => id)
+    .sort((left, right) => Number(left) - Number(right));
+}
+
+function sameSortedIds(left, right) {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+function metricOnlyBaseProducts(baseProducts, metric, ids) {
+  return Object.fromEntries(
+    ids
+      .map((id) => [id, readPrice(baseProducts[id]?.[metric])])
+      .filter(([, value]) => value !== null)
+      .map(([id, value]) => [id, { [metric]: value }]),
+  );
+}
+
+function describeMetricIds(ids, productMeta = {}) {
+  return ids.map((id) => ({
+    idProduct: Number(id),
+    name: productMeta[id]?.name ?? "",
+  }));
+}
+
 export function summarizeRebalance(previousBaseProducts, nextBaseProducts, rowsLength, metrics = SINGLES_METRICS) {
   return Object.fromEntries(
     metrics.map((metric) => {
@@ -487,7 +631,9 @@ function normalizeIndicatorHistory(existing, metrics) {
 }
 
 export function indicatorMetricsForUniverse(universe) {
-  return universe.id === "global-singles" ? [...WINDOW_INDICATOR_METRICS, ...TREND_INDICATOR_METRICS] : TREND_INDICATOR_METRICS;
+  return universe.metrics?.includes("avg1") && universe.metrics?.includes("avg7") && universe.metrics?.includes("avg30")
+    ? [...WINDOW_INDICATOR_METRICS, ...TREND_INDICATOR_METRICS]
+    : TREND_INDICATOR_METRICS;
 }
 
 export function buildIndicatorPoint(date, snapshot, baseProducts, universe = PRODUCT_UNIVERSES[0]) {
@@ -545,7 +691,7 @@ function buildIndicatorDiagnostics(snapshot, baseProducts, rebalanceEvent, unive
     rebalance: Boolean(rebalanceEvent),
     rebalanceDetails: rebalanceEvent,
   };
-  if (universe.id === "global-singles") {
+  if (indicatorMetricsForUniverse(universe).includes("advanceDecline")) {
     output.windowValidProducts = windowRows.length;
     output.windowUnavailableOrInvalidProducts = Math.max(activeCount - windowRows.length, 0);
     output.advanceDecline = windowBreadthCounts(windowRows);

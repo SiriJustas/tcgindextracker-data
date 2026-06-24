@@ -126,6 +126,12 @@ Each index diagnostic date includes:
 
 when a rebalance happened. Details are stored in `rebalanceDetails`.
 
+Curated set indexes use fixed-universe, metric-specific rebalancing.
+
+The set universe file defines the full card list and does not change during daily generation. Each price metric has its own active product ID set. If a card has no valid positive value for a metric, that card is excluded from that metric only. For example, a card missing `avg` can be excluded from the `avg` index while still participating in `avg1`, `avg7`, `avg30`, `low`, and `trend`.
+
+When a previously missing metric becomes available, or when the active product IDs for a metric otherwise change, only that metric is chain-linked. The pipeline compares the actual sorted product ID sets, not just counts, so a count-stable component swap still triggers a metric rebalance. No metric falls back to another metric, and `*-holo` fields are never used.
+
 ## Data Layout
 
 Generated files are published under `public/data`, which becomes `/data` on GitHub Pages.
@@ -135,6 +141,8 @@ public/data/pokemon/manifest.json
 public/data/pokemon/summary.json
 public/data/pokemon/indexes/{indexId}.json
 public/data/pokemon/indexes/{universeId}-universe.json
+public/data/pokemon/indexes/set-singles-universes-manifest.json
+public/data/pokemon/indexes/{setSlug}-singles-universe.json
 public/data/pokemon/indicators/{universeId}.json
 ```
 
@@ -262,6 +270,7 @@ Current indicator files:
 /data/pokemon/indicators/global-singles.json
 /data/pokemon/indicators/global-booster-boxes.json
 /data/pokemon/indicators/global-booster-packs.json
+/data/pokemon/indicators/{setSlug}-singles.json
 ```
 
 Global Singles window metrics:
@@ -309,6 +318,60 @@ Booster Boxes and Booster Packs order:
 
 ```text
 [date, advanceDeclineTrend, percentAboveTrend, trendHeat, floorStrength, spread, trendDispersion]
+```
+
+### Set Universe Files
+
+Set universe files are fixed audit/mapping files for Pokemon single-card sets. They are curated membership files, not automatic `idExpansion` exports.
+
+Cardmarket expansion IDs can group several product variants together. For example, Base Set products can appear under the same expansion while representing different print variants. The public product catalog also does not expose a dedicated field for Unlimited, 1st Edition, Shadowless, rarity, card number, or language. Because of that, set universes must be reviewed and curated before they are published.
+
+The current Base Set interpretation is:
+
+- `273xxx` product cluster - Base Set Unlimited.
+- `660xxx` premium product cluster - Base Set Shadowless.
+- Base Set 1st Edition is not published because the available Cardmarket files do not expose a reliable separate 1st Edition universe.
+
+Machamp is excluded from both Base Set variant universes because it behaves as a special/ambiguous Base Set product.
+
+Example path:
+
+```text
+/data/pokemon/indexes/base-set-1st-edition-singles-universe.json
+```
+
+Important fields:
+
+- `name` - curated set display name
+- `slug` - stable file slug
+- `count` - number of single-card products in the set universe
+- `curation` - how the universe was selected and whether it still needs manual review
+- `entries` - compact product map `{ "idProduct": "Card Name" }`
+
+Current set-universe coverage is intentionally limited to curated WOTC files:
+
+- `base-set-unlimited-singles-universe.json` - 101 products, excluding Machamp
+- `base-set-shadowless-singles-universe.json` - 102 products, excluding Machamp
+- `jungle-singles-universe.json` - 64 cards
+- `fossil-singles-universe.json` - 62 cards
+- `base-set-2-singles-universe.json` - 130 cards
+- `team-rocket-singles-universe.json` - 83 cards
+
+Product counts may differ from printed checklist counts when Cardmarket splits, omits, or separately represents product variants.
+
+Set universe files do not calculate prices by themselves. They are fixed universe inputs for per-set price indexes, so per-set indexes are generated from reviewed membership rather than recalculating set membership from `idExpansion`.
+
+Generated set index files live beside the universe files:
+
+```text
+/data/pokemon/indexes/{setSlug}-singles-equal.json
+/data/pokemon/indexes/{setSlug}-singles-market.json
+```
+
+Generated set indicator files live under:
+
+```text
+/data/pokemon/indicators/{setSlug}-singles.json
 ```
 
 ## Data Updates
@@ -362,6 +425,8 @@ Example files:
 /data/pokemon/summary.json
 /data/pokemon/indexes/global-singles-equal.json
 /data/pokemon/indexes/global-singles-universe.json
+/data/pokemon/indexes/set-singles-universes-manifest.json
+/data/pokemon/indexes/base-set-1st-edition-singles-universe.json
 /data/pokemon/indicators/global-singles.json
 /data/pokemon/indicators/global-booster-boxes.json
 /data/pokemon/indicators/global-booster-packs.json
