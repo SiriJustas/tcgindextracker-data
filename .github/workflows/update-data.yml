@@ -60,47 +60,6 @@ jobs:
           const fs = require("node:fs");
           const path = require("node:path");
 
-          const requiredFiles = [
-            "public/data/pokemon/manifest.json",
-            "public/data/pokemon/summary.json",
-            "public/data/pokemon/indexes/global-singles-equal.json",
-            "public/data/pokemon/indexes/global-singles-market.json",
-            "public/data/pokemon/indexes/global-booster-boxes-equal.json",
-            "public/data/pokemon/indexes/global-booster-boxes-market.json",
-            "public/data/pokemon/indexes/global-booster-packs-equal.json",
-            "public/data/pokemon/indexes/global-booster-packs-market.json",
-            "public/data/pokemon/universes/global-singles-universe.json",
-            "public/data/pokemon/universes/global-booster-boxes-universe.json",
-            "public/data/pokemon/universes/global-booster-packs-universe.json",
-            "public/data/pokemon/universes/base-set-unlimited-singles-universe.json",
-            "public/data/pokemon/universes/base-set-shadowless-singles-universe.json",
-            "public/data/pokemon/universes/jungle-singles-universe.json",
-            "public/data/pokemon/universes/fossil-singles-universe.json",
-            "public/data/pokemon/universes/base-set-2-singles-universe.json",
-            "public/data/pokemon/universes/team-rocket-singles-universe.json",
-            "public/data/pokemon/indexes/base-set-unlimited-singles-equal.json",
-            "public/data/pokemon/indexes/base-set-unlimited-singles-market.json",
-            "public/data/pokemon/indexes/base-set-shadowless-singles-equal.json",
-            "public/data/pokemon/indexes/base-set-shadowless-singles-market.json",
-            "public/data/pokemon/indexes/jungle-singles-equal.json",
-            "public/data/pokemon/indexes/jungle-singles-market.json",
-            "public/data/pokemon/indexes/fossil-singles-equal.json",
-            "public/data/pokemon/indexes/fossil-singles-market.json",
-            "public/data/pokemon/indexes/base-set-2-singles-equal.json",
-            "public/data/pokemon/indexes/base-set-2-singles-market.json",
-            "public/data/pokemon/indexes/team-rocket-singles-equal.json",
-            "public/data/pokemon/indexes/team-rocket-singles-market.json",
-            "public/data/pokemon/indicators/global-singles.json",
-            "public/data/pokemon/indicators/global-booster-boxes.json",
-            "public/data/pokemon/indicators/global-booster-packs.json",
-            "public/data/pokemon/indicators/base-set-unlimited-singles.json",
-            "public/data/pokemon/indicators/base-set-shadowless-singles.json",
-            "public/data/pokemon/indicators/jungle-singles.json",
-            "public/data/pokemon/indicators/fossil-singles.json",
-            "public/data/pokemon/indicators/base-set-2-singles.json",
-            "public/data/pokemon/indicators/team-rocket-singles.json",
-          ];
-
           const windowsAbsolutePath = /[A-Za-z]:[\\/]/;
           const unixHomePath = /\/home\/[^/\s"]+\//;
           const macHomePath = /\/u(?:sers)\/[^/\s"]+\//i;
@@ -128,30 +87,55 @@ jobs:
             }
           }
 
-          for (const file of requiredFiles) readJson(file);
-
           const manifest = readJson("public/data/pokemon/manifest.json");
-          if (!Array.isArray(manifest.indexes) || manifest.indexes.length !== 18) {
-            throw new Error("manifest.json must list exactly eighteen indexes");
+          const summary = readJson("public/data/pokemon/summary.json");
+          const indexDir = "public/data/pokemon/indexes";
+          const indicatorDir = "public/data/pokemon/indicators";
+          const universeDir = "public/data/pokemon/universes";
+          const expectedUniverseCount = fs.readdirSync(universeDir).filter((name) => name.endsWith(".json")).length;
+          const expectedIndexCount = expectedUniverseCount * 2;
+          const expectedIndicatorCount = expectedUniverseCount;
+
+          if (!Array.isArray(manifest.indexes) || manifest.indexes.length !== expectedIndexCount) {
+            throw new Error(`manifest.json must list exactly ${expectedIndexCount} indexes`);
           }
-          if (!Array.isArray(manifest.indicators) || manifest.indicators.length !== 9) {
-            throw new Error("manifest.json must list exactly nine indicator files");
+          if (!Array.isArray(manifest.indicators) || manifest.indicators.length !== expectedIndicatorCount) {
+            throw new Error(`manifest.json must list exactly ${expectedIndicatorCount} indicator files`);
           }
-          if (!Array.isArray(manifest.universes) || manifest.universes.length !== 9) {
-            throw new Error("manifest.json must list exactly nine universes");
+          if (!Array.isArray(manifest.universes) || manifest.universes.length !== expectedUniverseCount) {
+            throw new Error(`manifest.json must list exactly ${expectedUniverseCount} universes`);
           }
-          for (const universe of manifest.universes) {
-            if (!String(universe.universeFile ?? "").startsWith("/data/pokemon/universes/")) {
-              throw new Error(`manifest universe has unexpected universeFile: ${universe.universeFile}`);
+          if (!Array.isArray(summary.indexes) || summary.indexes.length !== expectedIndexCount) {
+            throw new Error(`summary.json must list exactly ${expectedIndexCount} indexes`);
+          }
+          if (!Array.isArray(summary.indicators) || summary.indicators.length !== expectedIndicatorCount) {
+            throw new Error(`summary.json must list exactly ${expectedIndicatorCount} indicator summaries`);
+          }
+
+          const requiredIds = [
+            "global-singles",
+            "global-booster-boxes",
+            "global-booster-packs",
+          ];
+          for (const id of requiredIds) {
+            if (!manifest.universes.some((universe) => universe.id === id)) {
+              throw new Error(`Missing required universe: ${id}`);
+            }
+            if (!manifest.indicators.some((indicator) => indicator.id === id)) {
+              throw new Error(`Missing required indicator: ${id}`);
+            }
+            for (const method of ["equal", "market"]) {
+              if (!manifest.indexes.some((index) => index.id === `${id}-${method}`)) {
+                throw new Error(`Missing required index: ${id}-${method}`);
+              }
             }
           }
 
-          const summary = readJson("public/data/pokemon/summary.json");
-          if (!Array.isArray(summary.indexes) || summary.indexes.length !== 18) {
-            throw new Error("summary.json must list exactly eighteen indexes");
-          }
-          if (!Array.isArray(summary.indicators) || summary.indicators.length !== 9) {
-            throw new Error("summary.json must list exactly nine indicator summaries");
+          function publicPathToFile(publicPath) {
+            if (!publicPath.startsWith("/data/pokemon/")) {
+              throw new Error(`Unexpected public data path: ${publicPath}`);
+            }
+            return path.join("public", publicPath.slice(1));
           }
 
           const singlesMetrics = ["avg1", "avg7", "avg30", "avg", "low", "trend"];
@@ -159,70 +143,56 @@ jobs:
           const windowIndicatorMetrics = ["advanceDecline", "percentAbove30d", "heat", "dispersion"];
           const trendIndicatorMetrics = ["advanceDeclineTrend", "percentAboveTrend", "trendHeat", "floorStrength", "spread", "trendDispersion"];
 
+          function sameMetrics(actual, expected) {
+            return JSON.stringify(actual) === JSON.stringify(expected);
+          }
+
           function assertMetrics(file, expected) {
             const data = readJson(file);
-            if (JSON.stringify(data.metrics) !== JSON.stringify(expected)) {
+            if (!sameMetrics(data.metrics, expected)) {
               throw new Error(`${file} has unexpected metrics`);
             }
           }
 
-          assertMetrics("public/data/pokemon/indexes/global-singles-equal.json", singlesMetrics);
-          assertMetrics("public/data/pokemon/indexes/global-singles-market.json", singlesMetrics);
-          assertMetrics("public/data/pokemon/universes/global-singles-universe.json", singlesMetrics);
-          for (const file of [
-            "public/data/pokemon/indexes/global-booster-boxes-equal.json",
-            "public/data/pokemon/indexes/global-booster-boxes-market.json",
-            "public/data/pokemon/universes/global-booster-boxes-universe.json",
-            "public/data/pokemon/indexes/global-booster-packs-equal.json",
-            "public/data/pokemon/indexes/global-booster-packs-market.json",
-            "public/data/pokemon/universes/global-booster-packs-universe.json",
-          ]) {
-            assertMetrics(file, sealedMetrics);
-          }
-          assertMetrics("public/data/pokemon/indicators/global-singles.json", [...windowIndicatorMetrics, ...trendIndicatorMetrics]);
-          assertMetrics("public/data/pokemon/indicators/global-booster-boxes.json", trendIndicatorMetrics);
-          assertMetrics("public/data/pokemon/indicators/global-booster-packs.json", trendIndicatorMetrics);
-
-          for (const file of [
-            "public/data/pokemon/indexes/base-set-unlimited-singles-equal.json",
-            "public/data/pokemon/indexes/base-set-unlimited-singles-market.json",
-            "public/data/pokemon/indexes/base-set-shadowless-singles-equal.json",
-            "public/data/pokemon/indexes/base-set-shadowless-singles-market.json",
-            "public/data/pokemon/indexes/jungle-singles-equal.json",
-            "public/data/pokemon/indexes/jungle-singles-market.json",
-            "public/data/pokemon/indexes/fossil-singles-equal.json",
-            "public/data/pokemon/indexes/fossil-singles-market.json",
-            "public/data/pokemon/indexes/base-set-2-singles-equal.json",
-            "public/data/pokemon/indexes/base-set-2-singles-market.json",
-            "public/data/pokemon/indexes/team-rocket-singles-equal.json",
-            "public/data/pokemon/indexes/team-rocket-singles-market.json",
-          ]) {
-            assertMetrics(file, singlesMetrics);
+          for (const universe of manifest.universes) {
+            if (!String(universe.universeFile ?? "").startsWith("/data/pokemon/universes/")) {
+              throw new Error(`manifest universe has unexpected universeFile: ${universe.universeFile}`);
+            }
+            if (/nintendo/i.test(`${universe.id} ${universe.name}`)) {
+              throw new Error(`Unverified promo universe was published: ${universe.id}`);
+            }
+            const file = publicPathToFile(universe.universeFile);
+            const expected = universe.id.startsWith("global-booster-") ? sealedMetrics : singlesMetrics;
+            assertMetrics(file, expected);
           }
 
-          for (const file of [
-            "public/data/pokemon/indicators/base-set-unlimited-singles.json",
-            "public/data/pokemon/indicators/base-set-shadowless-singles.json",
-            "public/data/pokemon/indicators/jungle-singles.json",
-            "public/data/pokemon/indicators/fossil-singles.json",
-            "public/data/pokemon/indicators/base-set-2-singles.json",
-            "public/data/pokemon/indicators/team-rocket-singles.json",
-          ]) {
-            assertMetrics(file, [...windowIndicatorMetrics, ...trendIndicatorMetrics]);
+          for (const index of manifest.indexes) {
+            if (!String(index.file ?? "").startsWith("/data/pokemon/indexes/")) {
+              throw new Error(`manifest index has unexpected file: ${index.file}`);
+            }
+            const file = publicPathToFile(index.file);
+            const expected = index.id.startsWith("global-booster-") ? sealedMetrics : singlesMetrics;
+            assertMetrics(file, expected);
           }
 
-          const indexDir = "public/data/pokemon/indexes";
+          for (const indicator of manifest.indicators) {
+            if (!String(indicator.file ?? "").startsWith("/data/pokemon/indicators/")) {
+              throw new Error(`manifest indicator has unexpected file: ${indicator.file}`);
+            }
+            const file = publicPathToFile(indicator.file);
+            const expected = indicator.id.startsWith("global-booster-") ? trendIndicatorMetrics : [...windowIndicatorMetrics, ...trendIndicatorMetrics];
+            assertMetrics(file, expected);
+          }
+
           for (const name of fs.readdirSync(indexDir)) {
             if (name.endsWith("-universe.json") || name === "set-singles-universes-manifest.json") {
               throw new Error(`Universe file must not remain in indexes folder: ${name}`);
             }
             if (name.endsWith(".json")) readJson(path.join(indexDir, name));
           }
-          const indicatorDir = "public/data/pokemon/indicators";
           for (const name of fs.readdirSync(indicatorDir)) {
             if (name.endsWith(".json")) readJson(path.join(indicatorDir, name));
           }
-          const universeDir = "public/data/pokemon/universes";
           for (const name of fs.readdirSync(universeDir)) {
             if (name.endsWith(".json")) readJson(path.join(universeDir, name));
           }

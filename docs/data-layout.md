@@ -115,13 +115,22 @@ Entry shape:
 
 Set universe files are fixed reviewed membership files, not automatic `idExpansion` exports.
 
-Current curated set universe coverage:
+Current curated set universe coverage includes these fixed Cardmarket product-ID universes:
 
-- `base-set-unlimited-singles-universe.json` - 101 products, excluding Machamp
-- `base-set-shadowless-singles-universe.json` - 102 products, excluding Machamp
-- `jungle-singles-universe.json` - 64 cards
-- `fossil-singles-universe.json` - 62 cards
+- `base-set-unlimited-singles-universe.json` - 102 products
+- `base-set-shadowless-singles-universe.json` - 103 products
+- `jungle-singles-universe.json` - 66 products
+- `fossil-singles-universe.json` - 63 products
 - `base-set-2-singles-universe.json` - 130 cards
-- `team-rocket-singles-universe.json` - 83 cards
+- `team-rocket-singles-universe.json` - 84 products
+- Gym Challenge, Gym Heroes, Neo Genesis, Neo Discovery, Southern Islands, Neo Revelation, Neo Destiny
+- Legendary Collection, Expedition, Aquapolis, Skyridge
+- EX Ruby & Sapphire through EX Power Keepers
+- POP Series 1 through POP Series 8
+- Diamond & Pearl, Mysterious Treasures, Secret Wonders, Great Encounters, Majestic Dawn, Legends Awakened, Stormfront
 
 Cardmarket expansion IDs can group several print variants together. Because the catalog does not expose a reliable variant field for every case, curated set universes are reviewed before publication.
+
+For expansion-based universes, `curation.cardmarketProductCount` records the number of actual Cardmarket product rows published in the universe. We do not store external checklist counts in the data files because those counts can represent printed checklists, reverse-holo checklists, promos, or other variants differently from Cardmarket product rows.
+
+Nintendo Black Star Promo is not published yet. The current catalog candidates behave like broad promo buckets rather than a reliable 98-product Nintendo Black Star universe, so it is deferred until the product-ID mapping can be verified.
