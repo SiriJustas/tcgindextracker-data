@@ -1,6 +1,5 @@
 downloads/
 tmp/
-public/data/
 .index-state/
 audit/
 *.csv
