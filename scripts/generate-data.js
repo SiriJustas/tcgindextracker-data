@@ -2,12 +2,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   INDEX_DEFINITIONS,
-  METRICS,
   PRODUCT_UNIVERSES,
   activeProductsByMetric,
   assertFreshPriceGuide,
   auditPokemonProducts,
   buildBaseProductsFromSnapshot,
+  buildIndicatorFile,
   buildUniverseFile,
   createSnapshot,
   ensureBaseState,
@@ -41,6 +41,7 @@ const allowStalePrices = Boolean(args["allow-stale-prices"]);
 const tcg = "pokemon";
 const tcgOutDir = path.join(outDir, tcg);
 const indexesDir = path.join(tcgOutDir, "indexes");
+const indicatorsDir = path.join(tcgOutDir, "indicators");
 
 const productsPayload = await readJson(productsPath);
 const nonSinglesPayload = await readJson(nonSinglesPath);
@@ -56,58 +57,70 @@ const nextUniverses = {};
 const universeSnapshots = {};
 
 await mkdir(indexesDir, { recursive: true });
+await mkdir(indicatorsDir, { recursive: true });
 await mkdir(path.dirname(statePath), { recursive: true });
 
 const summary = {
   updatedAt: valuationDate,
-  metrics: METRICS,
   indexes: [],
+  indicators: [],
 };
 
 const manifest = {
   updatedAt: valuationDate,
   version: Number(valuationDate.replaceAll("-", "")),
-  metrics: METRICS,
-  indexes: INDEX_DEFINITIONS.map(({ id, name, file, description }) => ({ id, name, file, description })),
+  indexes: INDEX_DEFINITIONS.map(({ id, name, file, description, metrics }) => ({ id, name, file, description, metrics })),
   universes: PRODUCT_UNIVERSES.map((universe) => ({
     id: universe.id,
     name: universe.name,
     tcg,
+    metrics: universe.metrics,
     universeFile: universeFilePath(universe),
   })),
+  indicators: [
+    {
+      id: "global-singles",
+      name: "Global Singles Market Indicators",
+      universe: "global-singles",
+      file: "/data/pokemon/indicators/global-singles.json",
+      metrics: ["advanceDecline", "percentAbove30d", "heat", "dispersion"],
+    },
+  ],
 };
 
 for (const universe of PRODUCT_UNIVERSES) {
+  const metrics = universe.metrics;
   const audit = auditPokemonProducts(sourcePayloads[universe.source], universe);
   const rows = joinPokemonProducts(sourcePayloads[universe.source], priceGuidePayload, universe);
   const previousUniverseState = previousUniverses[universe.id] ?? { products: {} };
-  const existingBaseProducts = buildBaseProductsFromSnapshot(previousUniverseState.baseProducts ?? {});
-  const oldSnapshotData = createSnapshot(rows, previousUniverseState, existingBaseProducts, universe.priceField);
-  const initialBaseProducts = ensureBaseState(previousUniverseState, oldSnapshotData.snapshot);
+  const existingBaseProducts = buildBaseProductsFromSnapshot(previousUniverseState.baseProducts ?? {}, metrics);
+  const oldSnapshotData = createSnapshot(rows, previousUniverseState, existingBaseProducts, metrics);
+  const initialBaseProducts = ensureBaseState(previousUniverseState, oldSnapshotData.snapshot, metrics);
+  const schemaCorrection = Object.keys(existingBaseProducts).length === 0 && Object.keys(previousUniverseState.baseProducts ?? {}).length > 0;
   const rebalance = shouldRebalanceUniverse(universe, { ...previousUniverseState, baseProducts: initialBaseProducts }, valuationDate);
-  const previousScaleByMethodMetric = normalizeScaleByMethodMetric(previousUniverseState.scaleByMethodMetric);
+  const previousScaleByMethodMetric = normalizeScaleByMethodMetric(schemaCorrection ? {} : previousUniverseState.scaleByMethodMetric, metrics);
   let baseProducts = initialBaseProducts;
-  let baseDate = previousUniverseState.baseDate ?? valuationDate;
+  let baseDate = schemaCorrection ? valuationDate : previousUniverseState.baseDate ?? valuationDate;
   let scaleByMethodMetric = previousScaleByMethodMetric;
   let snapshotData = oldSnapshotData;
   let rebalanceEvent = null;
 
   if (rebalance) {
-    const candidateSnapshotData = createSnapshot(rows, {}, null, universe.priceField);
-    const rebalancedBaseProducts = buildBaseProductsFromSnapshot(candidateSnapshotData.snapshot);
-    const rebalancedScaleByMethodMetric = buildRebalanceScale(previousScaleByMethodMetric, oldSnapshotData.snapshot, initialBaseProducts);
+    const candidateSnapshotData = createSnapshot(rows, {}, null, metrics);
+    const rebalancedBaseProducts = buildBaseProductsFromSnapshot(candidateSnapshotData.snapshot, metrics);
+    const rebalancedScaleByMethodMetric = buildRebalanceScale(previousScaleByMethodMetric, oldSnapshotData.snapshot, initialBaseProducts, metrics);
     const finalSnapshotData = createSnapshot(
       rows,
       { products: candidateSnapshotData.state.products, productMeta: candidateSnapshotData.state.productMeta },
       rebalancedBaseProducts,
-      universe.priceField,
+      metrics,
     );
 
     rebalanceEvent = {
       date: valuationDate,
       previousBaseDate: baseDate,
       newBaseDate: valuationDate,
-      summary: summarizeRebalance(initialBaseProducts, rebalancedBaseProducts, rows.length),
+      summary: summarizeRebalance(initialBaseProducts, rebalancedBaseProducts, rows.length, metrics),
     };
     baseProducts = rebalancedBaseProducts;
     baseDate = valuationDate;
@@ -118,14 +131,14 @@ for (const universe of PRODUCT_UNIVERSES) {
       rows,
       { products: oldSnapshotData.state.products, productMeta: oldSnapshotData.state.productMeta },
       baseProducts,
-      universe.priceField,
+      metrics,
     );
   }
 
   const { snapshot, state, quality } = snapshotData;
 
-  for (const metric of METRICS) {
-    quality[metric].activeProducts = activeProductsByMetric(baseProducts)[metric];
+  for (const metric of metrics) {
+    quality[metric].activeProducts = activeProductsByMetric(baseProducts, metrics)[metric];
   }
 
   const rebalances = upsertRebalanceEvent(previousUniverseState.rebalances ?? [], rebalanceEvent);
@@ -134,6 +147,7 @@ for (const universe of PRODUCT_UNIVERSES) {
     products: state.products,
     productMeta: state.productMeta,
     baseProducts,
+    metrics,
     baseDate,
     lastRebalancedAt: rebalance ? valuationDate : previousUniverseState.lastRebalancedAt,
     lastRebalanceMonth: rebalance ? valuationDate.slice(0, 7) : previousUniverseState.lastRebalanceMonth ?? baseDate.slice(0, 7),
@@ -181,19 +195,22 @@ for (const universe of PRODUCT_UNIVERSES) {
 
 for (const definition of INDEX_DEFINITIONS) {
   const universe = PRODUCT_UNIVERSES.find((item) => item.id === definition.universeId);
+  const metrics = universe.metrics;
   const universeData = universeSnapshots[definition.universeId];
   const indexPath = path.join(indexesDir, `${definition.id}.json`);
   const existing = await readOptionalJson(indexPath, null);
+  const existingCompatible = arraysEqual(existing?.metrics, metrics) ? existing : null;
   const point = buildScaledPoint(
     definition.method,
     valuationDate,
     universeData.snapshot,
     universeData.baseProducts,
     universeData.scaleByMethodMetric[definition.method],
+    metrics,
   );
-  const points = upsertPoint(existing?.points ?? [], point);
+  const points = upsertPoint(existingCompatible?.points ?? [], point);
   const diagnostics = {
-    ...(existing?.diagnostics ?? {}),
+    ...(existingCompatible?.diagnostics ?? {}),
     [valuationDate]: {
       sourceCreatedAt: {
         products: universeData.sourceCreatedAt,
@@ -215,10 +232,10 @@ for (const definition of INDEX_DEFINITIONS) {
     id: definition.id,
     name: definition.name,
     currency: "EUR",
-    baseDate: existing?.baseDate ?? valuationDate,
+    baseDate: existingCompatible?.baseDate ?? valuationDate,
     baseValue: 100,
     updatedAt: valuationDate,
-    metrics: METRICS,
+    metrics,
     composition: {
       universe: definition.universeId,
       universePolicy: universe.rebalancePolicy,
@@ -230,8 +247,8 @@ for (const definition of INDEX_DEFINITIONS) {
       candidateProducts: universeData.audit.candidateProducts,
       includedProducts: universeData.audit.includedProducts,
       rejectedProducts: universeData.audit.rejectedProducts,
-      activeProductsByMetric: activeProductsByMetric(universeData.baseProducts),
-      unavailableActiveProductsByMetric: Object.fromEntries(METRICS.map((metric) => [metric, universeData.quality[metric].unavailable])),
+      activeProductsByMetric: activeProductsByMetric(universeData.baseProducts, metrics),
+      unavailableActiveProductsByMetric: Object.fromEntries(metrics.map((metric) => [metric, universeData.quality[metric].unavailable])),
     },
     diagnostics,
     points,
@@ -244,13 +261,43 @@ for (const definition of INDEX_DEFINITIONS) {
     id: definition.id,
     name: definition.name,
     file: definition.file,
-    latest: Object.fromEntries(METRICS.map((metric, index) => [metric, latest?.[index + 1] ?? null])),
-    change1d: Object.fromEntries(METRICS.map((metric, index) => [metric, percentChange(points, index + 1, 1)])),
-    change7d: Object.fromEntries(METRICS.map((metric, index) => [metric, percentChange(points, index + 1, 7)])),
-    change30d: Object.fromEntries(METRICS.map((metric, index) => [metric, percentChange(points, index + 1, 30)])),
+    metrics,
+    latest: Object.fromEntries(metrics.map((metric, index) => [metric, latest?.[index + 1] ?? null])),
+    change1d: Object.fromEntries(metrics.map((metric, index) => [metric, percentChange(points, index + 1, 1)])),
+    change7d: Object.fromEntries(metrics.map((metric, index) => [metric, percentChange(points, index + 1, 7)])),
+    change30d: Object.fromEntries(metrics.map((metric, index) => [metric, percentChange(points, index + 1, 30)])),
     quality: universeData.quality,
   });
 }
+
+const singlesUniverse = PRODUCT_UNIVERSES.find((universe) => universe.id === "global-singles");
+const singlesData = universeSnapshots["global-singles"];
+const indicatorPath = path.join(indicatorsDir, "global-singles.json");
+const existingIndicator = await readOptionalJson(indicatorPath, null);
+const indicatorFile = buildIndicatorFile({
+  universe: singlesUniverse,
+  updatedAt: valuationDate,
+  baseDate: singlesData.baseDate,
+  snapshot: singlesData.snapshot,
+  baseProducts: singlesData.baseProducts,
+  existing: existingIndicator,
+  rebalanceEvent: singlesData.rebalanceEvent,
+  rebalances: singlesData.rebalances,
+});
+await writeCompactJson(indicatorPath, indicatorFile);
+
+const latestIndicator = indicatorFile.points.at(-1);
+summary.indicators.push({
+  id: indicatorFile.id,
+  name: indicatorFile.name,
+  universe: indicatorFile.universe,
+  file: "/data/pokemon/indicators/global-singles.json",
+  metrics: indicatorFile.metrics,
+  latest: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, latestIndicator?.[index + 1] ?? null])),
+  change1d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 1)])),
+  change7d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 7)])),
+  change30d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 30)])),
+});
 
 await writeCompactJson(path.join(tcgOutDir, "manifest.json"), manifest);
 await writeCompactJson(path.join(tcgOutDir, "summary.json"), summary);
@@ -315,4 +362,8 @@ function migrateUniverseKeys(universes) {
 function upsertRebalanceEvent(events, event) {
   if (!event) return events;
   return [...events.filter((existing) => existing.date !== event.date), event].sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function arraysEqual(left, right) {
+  return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every((value, index) => value === right[index]);
 }

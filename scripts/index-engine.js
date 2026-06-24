@@ -1,4 +1,6 @@
-export const METRICS = ["avg1", "avg7", "avg30"];
+export const SINGLES_METRICS = ["avg1", "avg7", "avg30", "avg", "low", "trend"];
+export const SEALED_METRICS = ["avg", "low", "trend"];
+export const INDICATOR_METRICS = ["advanceDecline", "percentAbove30d", "heat", "dispersion"];
 
 export const PRODUCT_UNIVERSES = [
   {
@@ -6,7 +8,7 @@ export const PRODUCT_UNIVERSES = [
     name: "Global Singles",
     categoryId: 51,
     source: "singles",
-    priceField: null,
+    metrics: SINGLES_METRICS,
     description: "Pokemon single cards.",
     itemLabel: "Pokemon single card",
     matcher: "singles",
@@ -18,7 +20,7 @@ export const PRODUCT_UNIVERSES = [
     name: "Booster Boxes",
     categoryId: 53,
     source: "nonSingles",
-    priceField: "trend",
+    metrics: SEALED_METRICS,
     description: "Pokemon booster boxes and displays.",
     itemLabel: "Pokemon booster box/display",
     matcher: "boosterBoxes",
@@ -30,7 +32,7 @@ export const PRODUCT_UNIVERSES = [
     name: "Booster Packs",
     categoryId: 52,
     source: "nonSingles",
-    priceField: "trend",
+    metrics: SEALED_METRICS,
     description: "Pokemon individual booster packs.",
     itemLabel: "Pokemon booster pack",
     matcher: "boosterPacks",
@@ -60,6 +62,7 @@ export const INDEX_DEFINITIONS = PRODUCT_UNIVERSES.flatMap((universe) =>
     name: `${universe.name} ${indexMethod.label}`,
     method: indexMethod.method,
     universeId: universe.id,
+    metrics: universe.metrics,
     file: `/data/pokemon/indexes/${universe.id}-${indexMethod.suffix}.json`,
     description: indexMethod.description(universe),
   })),
@@ -70,9 +73,10 @@ export function universeFilePath(universe) {
 }
 
 export function buildUniverseFile({ universe, updatedAt, baseDate, rows, baseProducts, productMeta = {} }) {
+  const metrics = universe.metrics;
   const productsById = new Map(rows.map((row) => [String(row.product.idProduct), row.product]));
   const sortedProducts = Object.entries(baseProducts)
-    .filter(([, prices]) => hasAllMetricPrices(prices))
+    .filter(([, prices]) => hasAllMetricPrices(prices, metrics))
     .map(([id]) => {
       const product = productsById.get(id);
       return {
@@ -91,7 +95,7 @@ export function buildUniverseFile({ universe, updatedAt, baseDate, rows, basePro
     id: `${universe.universeSlug}-universe`,
     tcg: "pokemon",
     universe: universe.id,
-    metrics: METRICS,
+    metrics,
     updatedAt,
     baseDate,
     count: sortedProducts.length,
@@ -197,7 +201,7 @@ function normalizedProductName(name) {
   return String(name ?? "").toLowerCase();
 }
 
-export function createSnapshot(rows, previousState = {}, baseProducts = null, priceField = null) {
+export function createSnapshot(rows, previousState = {}, baseProducts = null, metrics = SINGLES_METRICS) {
   const productState = previousState.products ?? {};
   const productMeta = previousState.productMeta ?? {};
   const snapshot = {};
@@ -207,7 +211,7 @@ export function createSnapshot(rows, previousState = {}, baseProducts = null, pr
   const nextProductMeta = hasActiveBase ? {} : { ...productMeta };
   const idsToProcess = hasActiveBase ? Object.keys(baseProducts) : rows.map((row) => String(row.product.idProduct));
   const quality = Object.fromEntries(
-    METRICS.map((metric) => [
+    metrics.map((metric) => [
       metric,
       {
         matchedProducts: idsToProcess.length,
@@ -221,7 +225,7 @@ export function createSnapshot(rows, previousState = {}, baseProducts = null, pr
   );
 
   if (hasActiveBase) {
-    for (const metric of METRICS) {
+    for (const metric of metrics) {
       quality[metric].activeProducts = Object.values(baseProducts).filter((prices) => readPrice(prices?.[metric]) !== null).length;
     }
   }
@@ -234,14 +238,14 @@ export function createSnapshot(rows, previousState = {}, baseProducts = null, pr
     nextProducts[id] = { ...(nextProducts[id] ?? {}) };
     nextProductMeta[id] = compactProductMeta(product);
 
-    for (const metric of METRICS) {
+    for (const metric of metrics) {
       if (!row) {
         quality[metric].unavailable += 1;
         carryForwardProductMetric({ snapshot, nextProducts, productState, id, metric, quality });
         continue;
       }
 
-      const freshValue = readPrice(priceField ? price[priceField] : price[metric]);
+      const freshValue = readPrice(price[metric]);
       if (freshValue !== null) {
         snapshot[id][metric] = freshValue;
         nextProducts[id][metric] = freshValue;
@@ -274,42 +278,42 @@ function compactProductMeta(product) {
   };
 }
 
-export function ensureBaseState(existingIndex, snapshot) {
+export function ensureBaseState(existingIndex, snapshot, metrics = SINGLES_METRICS) {
   const currentBase = existingIndex?.baseProducts ?? {};
-  const completeCurrentBase = filterCompleteBaseProducts(currentBase);
-  if (hasAnyBasePrice(completeCurrentBase)) {
+  const completeCurrentBase = filterCompleteBaseProducts(currentBase, metrics);
+  if (hasAnyBasePrice(completeCurrentBase, metrics)) {
     return completeCurrentBase;
   }
 
-  return buildBaseProductsFromSnapshot(snapshot);
+  return buildBaseProductsFromSnapshot(snapshot, metrics);
 }
 
-function hasAnyBasePrice(baseProducts) {
-  return Object.values(baseProducts).some((prices) => METRICS.some((metric) => readPrice(prices?.[metric]) !== null));
+export function hasAnyBasePrice(baseProducts, metrics = SINGLES_METRICS) {
+  return Object.values(baseProducts).some((prices) => metrics.some((metric) => readPrice(prices?.[metric]) !== null));
 }
 
-function hasAllMetricPrices(prices) {
-  return METRICS.every((metric) => readPrice(prices?.[metric]) !== null);
+export function hasAllMetricPrices(prices, metrics = SINGLES_METRICS) {
+  return metrics.every((metric) => readPrice(prices?.[metric]) !== null);
 }
 
-function filterCompleteBaseProducts(baseProducts) {
-  return Object.fromEntries(Object.entries(baseProducts ?? {}).filter(([, prices]) => hasAllMetricPrices(prices)));
+function filterCompleteBaseProducts(baseProducts, metrics = SINGLES_METRICS) {
+  return Object.fromEntries(Object.entries(baseProducts ?? {}).filter(([, prices]) => hasAllMetricPrices(prices, metrics)));
 }
 
-export function activeProductsByMetric(baseProducts) {
+export function activeProductsByMetric(baseProducts, metrics = SINGLES_METRICS) {
   return Object.fromEntries(
-    METRICS.map((metric) => [metric, Object.values(baseProducts).filter((prices) => readPrice(prices?.[metric]) !== null).length]),
+    metrics.map((metric) => [metric, Object.values(baseProducts).filter((prices) => readPrice(prices?.[metric]) !== null).length]),
   );
 }
 
-export function buildBaseProductsFromSnapshot(snapshot) {
+export function buildBaseProductsFromSnapshot(snapshot, metrics = SINGLES_METRICS) {
   const baseProducts = {};
   for (const [id, prices] of Object.entries(snapshot)) {
-    if (!hasAllMetricPrices(prices)) {
+    if (!hasAllMetricPrices(prices, metrics)) {
       continue;
     }
     const metricPrices = {};
-    for (const metric of METRICS) {
+    for (const metric of metrics) {
       metricPrices[metric] = readPrice(prices[metric]);
     }
     baseProducts[id] = metricPrices;
@@ -319,7 +323,7 @@ export function buildBaseProductsFromSnapshot(snapshot) {
 
 export function shouldRebalanceUniverse(universe, state = {}, valuationDate) {
   if (universe.rebalancePolicy !== "monthly-chain-linked") return false;
-  if (!hasAnyBasePrice(state.baseProducts ?? {})) return false;
+  if (!hasAnyBasePrice(state.baseProducts ?? {}, universe.metrics)) return false;
   if (state.lastRebalancedAt === valuationDate) return false;
 
   const valuationMonth = monthKey(valuationDate);
@@ -332,16 +336,16 @@ export function monthKey(date) {
   return match?.[1] ?? null;
 }
 
-export function defaultScaleByMethodMetric() {
-  return Object.fromEntries(INDEX_METHODS.map(({ method }) => [method, Object.fromEntries(METRICS.map((metric) => [metric, 100]))]));
+export function defaultScaleByMethodMetric(metrics = SINGLES_METRICS) {
+  return Object.fromEntries(INDEX_METHODS.map(({ method }) => [method, Object.fromEntries(metrics.map((metric) => [metric, 100]))]));
 }
 
-export function normalizeScaleByMethodMetric(scaleByMethodMetric = {}) {
-  const defaults = defaultScaleByMethodMetric();
+export function normalizeScaleByMethodMetric(scaleByMethodMetric = {}, metrics = SINGLES_METRICS) {
+  const defaults = defaultScaleByMethodMetric(metrics);
   return Object.fromEntries(
     Object.entries(defaults).map(([method, metrics]) => [
       method,
-      Object.fromEntries(METRICS.map((metric) => [metric, readPrice(scaleByMethodMetric?.[method]?.[metric]) ?? metrics[metric]])),
+      Object.fromEntries(Object.keys(metrics).map((metric) => [metric, readPrice(scaleByMethodMetric?.[method]?.[metric]) ?? metrics[metric]])),
     ]),
   );
 }
@@ -378,27 +382,27 @@ export function calculateScaledMetricValue(method, snapshot, baseProducts, metri
   return raw === null ? null : roundIndex((raw * scale) / 100);
 }
 
-export function buildPoint(method, date, snapshot, baseProducts) {
+export function buildPoint(method, date, snapshot, baseProducts, metrics = SINGLES_METRICS) {
   return [
     date,
-    ...METRICS.map((metric) => calculateMetricValue(method, snapshot, baseProducts, metric)),
+    ...metrics.map((metric) => calculateMetricValue(method, snapshot, baseProducts, metric)),
   ];
 }
 
-export function buildScaledPoint(method, date, snapshot, baseProducts, scaleByMetric = {}) {
+export function buildScaledPoint(method, date, snapshot, baseProducts, scaleByMetric = {}, metrics = SINGLES_METRICS) {
   return [
     date,
-    ...METRICS.map((metric) => calculateScaledMetricValue(method, snapshot, baseProducts, metric, readPrice(scaleByMetric[metric]) ?? 100)),
+    ...metrics.map((metric) => calculateScaledMetricValue(method, snapshot, baseProducts, metric, readPrice(scaleByMetric[metric]) ?? 100)),
   ];
 }
 
-export function buildRebalanceScale(previousScaleByMethodMetric, oldSnapshot, oldBaseProducts) {
-  const previousScale = normalizeScaleByMethodMetric(previousScaleByMethodMetric);
+export function buildRebalanceScale(previousScaleByMethodMetric, oldSnapshot, oldBaseProducts, metrics = SINGLES_METRICS) {
+  const previousScale = normalizeScaleByMethodMetric(previousScaleByMethodMetric, metrics);
   return Object.fromEntries(
     INDEX_METHODS.map(({ method }) => [
       method,
       Object.fromEntries(
-        METRICS.map((metric) => [
+        metrics.map((metric) => [
           metric,
           calculateScaledMetricValue(method, oldSnapshot, oldBaseProducts, metric, previousScale[method][metric]) ?? previousScale[method][metric],
         ]),
@@ -407,11 +411,11 @@ export function buildRebalanceScale(previousScaleByMethodMetric, oldSnapshot, ol
   );
 }
 
-export function summarizeRebalance(previousBaseProducts, nextBaseProducts, rowsLength) {
+export function summarizeRebalance(previousBaseProducts, nextBaseProducts, rowsLength, metrics = SINGLES_METRICS) {
   return Object.fromEntries(
-    METRICS.map((metric) => {
-      const previousIds = metricEligibleIds(previousBaseProducts, metric);
-      const nextIds = metricEligibleIds(nextBaseProducts, metric);
+    metrics.map((metric) => {
+      const previousIds = metricEligibleIds(previousBaseProducts, metric, metrics);
+      const nextIds = metricEligibleIds(nextBaseProducts, metric, metrics);
       return [
         metric,
         {
@@ -426,8 +430,100 @@ export function summarizeRebalance(previousBaseProducts, nextBaseProducts, rowsL
   );
 }
 
-function metricEligibleIds(baseProducts, metric) {
-  return new Set(Object.entries(baseProducts ?? {}).filter(([, prices]) => hasAllMetricPrices(prices) && readPrice(prices?.[metric]) !== null).map(([id]) => id));
+function metricEligibleIds(baseProducts, metric, metrics = SINGLES_METRICS) {
+  return new Set(Object.entries(baseProducts ?? {}).filter(([, prices]) => hasAllMetricPrices(prices, metrics) && readPrice(prices?.[metric]) !== null).map(([id]) => id));
+}
+
+export function buildIndicatorFile({ universe, updatedAt, baseDate, snapshot, baseProducts, existing = null, rebalanceEvent = null, rebalances = [] }) {
+  const point = buildIndicatorPoint(updatedAt, snapshot, baseProducts);
+  const points = upsertPoint(existing?.points ?? [], point);
+  return {
+    id: universe.id,
+    name: `${universe.name} Market Indicators`,
+    tcg: "pokemon",
+    universe: universe.id,
+    updatedAt,
+    metrics: INDICATOR_METRICS,
+    units: {
+      advanceDecline: "ratio",
+      percentAbove30d: "percent",
+      heat: "score",
+      dispersion: "percent",
+    },
+    composition: {
+      universeFile: universeFilePath(universe),
+      universePolicy: universe.rebalancePolicy,
+      currentBaseDate: baseDate,
+      rebalanceCount: rebalances.length,
+    },
+    diagnostics: {
+      ...(existing?.diagnostics ?? {}),
+      [updatedAt]: buildIndicatorDiagnostics(snapshot, baseProducts, rebalanceEvent),
+    },
+    points,
+  };
+}
+
+export function buildIndicatorPoint(date, snapshot, baseProducts) {
+  const indicators = calculateSinglesIndicators(snapshot, baseProducts);
+  return [date, ...INDICATOR_METRICS.map((metric) => indicators[metric])];
+}
+
+export function calculateSinglesIndicators(snapshot, baseProducts) {
+  const rows = indicatorRows(snapshot, baseProducts);
+  const advancers = rows.filter((row) => row.avg1 > row.avg7).length;
+  const decliners = rows.filter((row) => row.avg1 < row.avg7).length;
+  const above30 = rows.filter((row) => row.avg1 > row.avg30).length;
+  const heatValues = rows.map((row) => 0.4 * (row.avg1 / row.avg7) + 0.6 * (row.avg7 / row.avg30));
+  const returns = rows.map((row) => row.avg1 / row.avg30 - 1);
+
+  return {
+    advanceDecline: decliners === 0 ? null : roundIndex(advancers / decliners),
+    percentAbove30d: rows.length === 0 ? null : roundIndex((above30 / rows.length) * 100),
+    heat: heatValues.length === 0 ? null : roundIndex(average(heatValues) * 100),
+    dispersion: returns.length === 0 ? null : roundIndex(populationStdDev(returns) * 100),
+  };
+}
+
+function buildIndicatorDiagnostics(snapshot, baseProducts, rebalanceEvent) {
+  const rows = indicatorRows(snapshot, baseProducts);
+  const activeCount = Object.keys(baseProducts ?? {}).length;
+  const advancers = rows.filter((row) => row.avg1 > row.avg7).length;
+  const decliners = rows.filter((row) => row.avg1 < row.avg7).length;
+  const unchanged = rows.filter((row) => row.avg1 === row.avg7).length;
+  return {
+    activeProducts: activeCount,
+    validProducts: rows.length,
+    unavailableOrInvalidProducts: Math.max(activeCount - rows.length, 0),
+    advanceDecline: {
+      advancers,
+      decliners,
+      unchanged,
+    },
+    rebalance: Boolean(rebalanceEvent),
+    rebalanceDetails: rebalanceEvent,
+  };
+}
+
+function indicatorRows(snapshot, baseProducts) {
+  return Object.keys(baseProducts ?? {})
+    .map((id) => ({
+      avg1: readPrice(snapshot[id]?.avg1),
+      avg7: readPrice(snapshot[id]?.avg7),
+      avg30: readPrice(snapshot[id]?.avg30),
+    }))
+    .filter((row) => row.avg1 !== null && row.avg7 !== null && row.avg30 !== null);
+}
+
+function average(values) {
+  return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function populationStdDev(values) {
+  if (values.length === 0) return 0;
+  const mean = average(values);
+  const variance = average(values.map((value) => (value - mean) ** 2));
+  return Math.sqrt(variance);
 }
 
 export function upsertPoint(points, point) {
@@ -439,10 +535,14 @@ export function upsertPoint(points, point) {
 
 export function percentChange(points, metricIndex, days) {
   if (points.length < 2) return null;
-  const latest = readPrice(points.at(-1)?.[metricIndex]);
-  const prior = readPrice(points.at(-(days + 1))?.[metricIndex]);
-  if (latest === null || prior === null) return null;
+  const latest = readNonNegativeNumber(points.at(-1)?.[metricIndex]);
+  const prior = readNonNegativeNumber(points.at(-(days + 1))?.[metricIndex]);
+  if (latest === null || prior === null || prior === 0) return null;
   return roundIndex(((latest - prior) / prior) * 100);
+}
+
+function readNonNegativeNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 export function roundIndex(value) {

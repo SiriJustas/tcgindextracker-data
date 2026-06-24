@@ -32,13 +32,26 @@ Future TCGs can use the same structure:
 
 ## How Indexes Are Calculated
 
-Each index tracks three price metrics:
+Indexes use the real Cardmarket price fields available for each product type. The project does not invent missing metrics or rename one Cardmarket field into another field.
 
-- `avg1` - short-term Cardmarket average price
-- `avg7` - 7-day Cardmarket average price
-- `avg30` - 30-day Cardmarket average price
+Global Singles tracks six metrics:
 
-Products enter a universe only when **all three metrics are valid positive numbers**. If any of `avg1`, `avg7`, or `avg30` is missing, zero, negative, or non-numeric, the product is excluded from that universe.
+- `avg1` - short-term Cardmarket average price.
+- `avg7` - 7-day Cardmarket average price.
+- `avg30` - 30-day Cardmarket average price.
+- `avg` - Cardmarket average price.
+- `low` - Cardmarket low price.
+- `trend` - Cardmarket trend price.
+
+Booster Boxes and Booster Packs track three sealed-product metrics:
+
+- `avg` - Cardmarket average price.
+- `low` - Cardmarket low price.
+- `trend` - Cardmarket trend price.
+
+Products enter a universe only when every configured metric for that universe is a valid positive number. Missing, zero, negative, or non-numeric prices exclude the product until a future rebalance. This prevents new or poorly priced products from distorting the index the moment they appear.
+
+Each metric is calculated as its own index series. For example, `global-singles-equal` contains six series in one compact file: one for `avg1`, one for `avg7`, one for `avg30`, one for `avg`, one for `low`, and one for `trend`.
 
 ### Equal Weight
 
@@ -48,7 +61,7 @@ Equal weight answers:
 
 Each product has the same influence. In portfolio language, this is like investing the same money amount into every product in the universe.
 
-For each product:
+For each product and metric:
 
 ```text
 relative = currentPrice / basePrice
@@ -59,6 +72,12 @@ Then:
 ```text
 equalWeightIndex = average(relative values) * 100
 ```
+
+Why this exists:
+
+- It shows broad product-level movement.
+- A cheap product and an expensive product count equally.
+- It is useful when you care about the typical card or product, not only the most expensive items.
 
 ### Market Weight
 
@@ -74,6 +93,12 @@ For each metric:
 marketWeightIndex = sum(currentPrices) / sum(basePrices) * 100
 ```
 
+Why this exists:
+
+- It shows how the total value of the tracked basket is moving.
+- Expensive products naturally matter more.
+- It is useful when you want the closest approximation of owning one unit of every eligible product.
+
 ## Rebalancing
 
 Global indexes use monthly chain-linked rebalancing.
@@ -83,7 +108,7 @@ Daily runs do **not** add or remove products from an active universe. They only 
 On the first successful fresh run of a new month:
 
 1. The old universe is valued first.
-2. A new universe is built from all eligible products with valid `avg1`, `avg7`, and `avg30` values.
+2. A new universe is built from all eligible products with valid prices for that universe's configured metrics.
 3. The new universe becomes active.
 4. A scale factor is stored so the index continues from the old value instead of resetting to `100`.
 
@@ -108,6 +133,7 @@ public/data/pokemon/manifest.json
 public/data/pokemon/summary.json
 public/data/pokemon/indexes/{indexId}.json
 public/data/pokemon/indexes/{universeId}-universe.json
+public/data/pokemon/indicators/{universeId}.json
 ```
 
 Raw Cardmarket downloads are temporary and must not be committed.
@@ -120,9 +146,10 @@ Important fields:
 
 - `updatedAt` - valuation date from the Cardmarket price guide
 - `version` - numeric version derived from `updatedAt`
-- `metrics` - available metric series
+- `indexes[].metrics` - metric series for each price index
 - `indexes` - generated index history files
 - `universes` - active universe files for each product universe
+- `indicators` - generated market indicator history files
 
 ### summary.json
 
@@ -131,8 +158,9 @@ Small file intended for initial app load.
 Important fields:
 
 - `updatedAt` - latest valuation date
-- `metrics` - available metric series
 - `indexes` - latest values and changes for each index
+- `indexes[].metrics` - metric series for each price index
+- `indicators` - latest market indicator values and changes
 - `latest` - latest index values by metric
 - `change1d`, `change7d`, `change30d` - percentage changes by metric
 - `quality` - daily active-universe pricing diagnostics
@@ -160,7 +188,21 @@ Important fields:
 - `diagnostics` - date-keyed source, quality, and rebalance information
 - `points` - historical index values
 
-Point shape:
+Point shape follows the file's own `metrics` order.
+
+Singles example:
+
+```json
+["2026-06-23",100,100,100,100,100,100]
+```
+
+The order is:
+
+```text
+[date, avg1Index, avg7Index, avg30Index, avgIndex, lowIndex, trendIndex]
+```
+
+Sealed example:
 
 ```json
 ["2026-06-23",100,100,100]
@@ -169,7 +211,7 @@ Point shape:
 The order is:
 
 ```text
-[date, avg1Index, avg7Index, avg30Index]
+[date, avgIndex, lowIndex, trendIndex]
 ```
 
 ### Universe Files
@@ -201,6 +243,46 @@ Entry shape:
 }
 ```
 
+### Indicator Files
+
+Market indicators describe the internal condition of a universe. They are not equal-weight or market-weight price indexes, and they are not chain-linked. They are direct readings of the current active universe.
+
+The first indicator file is generated for Global Singles because singles expose `avg1`, `avg7`, and `avg30`, which are needed for short-term breadth and momentum calculations.
+
+Current indicator file:
+
+```text
+/data/pokemon/indicators/global-singles.json
+```
+
+Indicator metrics:
+
+- `advanceDecline` - products where `avg1 > avg7` divided by products where `avg1 < avg7`.
+- `percentAbove30d` - percentage of products where `avg1 > avg30`.
+- `heat` - average of `0.4 * (avg1 / avg7) + 0.6 * (avg7 / avg30)`, multiplied by `100`.
+- `dispersion` - standard deviation of `(avg1 / avg30) - 1`, multiplied by `100`.
+
+Why these exist:
+
+- `advanceDecline` shows whether more products are rising than falling.
+- `percentAbove30d` shows how much of the universe is trading above its 30-day average.
+- `heat` combines very short-term and medium-term momentum into one score, where `100` is roughly neutral.
+- `dispersion` shows whether movement is broad and uniform or concentrated in a smaller group of products.
+
+Indicators are stored separately from price indexes because they answer a different question. Price indexes track value movement over time; indicators describe market condition and participation.
+
+Point shape:
+
+```json
+["2026-06-23",1.24,58.42,103.16,7.81]
+```
+
+The order is:
+
+```text
+[date, advanceDecline, percentAbove30d, heat, dispersion]
+```
+
 ## Data Updates
 
 GitHub Actions updates the data.
@@ -220,10 +302,10 @@ Scheduled workflow behavior:
 The workflow is scheduled at:
 
 ```text
-08:00, 12:00, 16:00, 20:00 UTC
+08:17, 12:17, 16:17, 20:17 UTC
 ```
 
-That corresponds to 11:00, 15:00, 19:00, and 23:00 Lithuania summer time.
+That corresponds to 11:17, 15:17, 19:17, and 23:17 Lithuania summer time.
 
 ## Accessing Data
 
@@ -240,6 +322,7 @@ Example files:
 /data/pokemon/summary.json
 /data/pokemon/indexes/global-singles-equal.json
 /data/pokemon/indexes/global-singles-universe.json
+/data/pokemon/indicators/global-singles.json
 ```
 
 A static frontend can fetch `summary.json` first, then lazy-load individual index files and universe files as needed.

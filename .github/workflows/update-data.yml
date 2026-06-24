@@ -3,7 +3,7 @@ name: Update and publish index data
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 8,12,16,20 * * *"
+    - cron: "17 8,12,16,20 * * *"
 
 permissions:
   contents: write
@@ -72,6 +72,7 @@ jobs:
             "public/data/pokemon/indexes/global-singles-universe.json",
             "public/data/pokemon/indexes/booster-boxes-universe.json",
             "public/data/pokemon/indexes/booster-packs-universe.json",
+            "public/data/pokemon/indicators/global-singles.json",
           ];
 
           const windowsAbsolutePath = /[A-Za-z]:[\\/]/;
@@ -107,15 +108,51 @@ jobs:
           if (!Array.isArray(manifest.indexes) || manifest.indexes.length !== 6) {
             throw new Error("manifest.json must list exactly six indexes");
           }
+          if (!Array.isArray(manifest.indicators) || manifest.indicators.length !== 1) {
+            throw new Error("manifest.json must list exactly one indicator file");
+          }
 
           const summary = readJson("public/data/pokemon/summary.json");
           if (!Array.isArray(summary.indexes) || summary.indexes.length !== 6) {
             throw new Error("summary.json must list exactly six indexes");
           }
+          if (!Array.isArray(summary.indicators) || summary.indicators.length !== 1) {
+            throw new Error("summary.json must list exactly one indicator summary");
+          }
+
+          const singlesMetrics = ["avg1", "avg7", "avg30", "avg", "low", "trend"];
+          const sealedMetrics = ["avg", "low", "trend"];
+          const indicatorMetrics = ["advanceDecline", "percentAbove30d", "heat", "dispersion"];
+
+          function assertMetrics(file, expected) {
+            const data = readJson(file);
+            if (JSON.stringify(data.metrics) !== JSON.stringify(expected)) {
+              throw new Error(`${file} has unexpected metrics`);
+            }
+          }
+
+          assertMetrics("public/data/pokemon/indexes/global-singles-equal.json", singlesMetrics);
+          assertMetrics("public/data/pokemon/indexes/global-singles-market.json", singlesMetrics);
+          assertMetrics("public/data/pokemon/indexes/global-singles-universe.json", singlesMetrics);
+          for (const file of [
+            "public/data/pokemon/indexes/booster-boxes-equal.json",
+            "public/data/pokemon/indexes/booster-boxes-market.json",
+            "public/data/pokemon/indexes/booster-boxes-universe.json",
+            "public/data/pokemon/indexes/booster-packs-equal.json",
+            "public/data/pokemon/indexes/booster-packs-market.json",
+            "public/data/pokemon/indexes/booster-packs-universe.json",
+          ]) {
+            assertMetrics(file, sealedMetrics);
+          }
+          assertMetrics("public/data/pokemon/indicators/global-singles.json", indicatorMetrics);
 
           const indexDir = "public/data/pokemon/indexes";
           for (const name of fs.readdirSync(indexDir)) {
             if (name.endsWith(".json")) readJson(path.join(indexDir, name));
+          }
+          const indicatorDir = "public/data/pokemon/indicators";
+          for (const name of fs.readdirSync(indicatorDir)) {
+            if (name.endsWith(".json")) readJson(path.join(indicatorDir, name));
           }
           NODE
 
