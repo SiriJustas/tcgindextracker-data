@@ -230,7 +230,7 @@ That corresponds to 11:00, 15:00, 19:00, and 23:00 Lithuania summer time.
 GitHub Pages project sites use this URL pattern:
 
 ```text
-https://<owner>.github.io/<repository>/data/pokemon/summary.json
+https://sirijustas.github.io/tcgindextracker-data/data/pokemon/summary.json
 ```
 
 Example files:
