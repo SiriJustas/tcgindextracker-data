@@ -71,7 +71,7 @@ export const INDEX_DEFINITIONS = PRODUCT_UNIVERSES.flatMap((universe) =>
 
 export function universeFilePath(universe) {
   if (universe.universeFile) return universe.universeFile;
-  return `/data/pokemon/indexes/${universe.universeSlug}-universe.json`;
+  return `/data/pokemon/universes/${universe.universeSlug}-universe.json`;
 }
 
 export function buildUniverseFile({ universe, updatedAt, baseDate, rows, baseProducts, productMeta = {} }) {

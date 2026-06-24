@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   INDEX_DEFINITIONS,
@@ -48,6 +48,7 @@ const tcg = "pokemon";
 const tcgOutDir = path.join(outDir, tcg);
 const indexesDir = path.join(tcgOutDir, "indexes");
 const indicatorsDir = path.join(tcgOutDir, "indicators");
+const universesDir = path.join(tcgOutDir, "universes");
 
 const productsPayload = await readJson(productsPath);
 const nonSinglesPayload = await readJson(nonSinglesPath);
@@ -64,6 +65,7 @@ const universeSnapshots = {};
 
 await mkdir(indexesDir, { recursive: true });
 await mkdir(indicatorsDir, { recursive: true });
+await mkdir(universesDir, { recursive: true });
 await mkdir(path.dirname(statePath), { recursive: true });
 
 const existingSummary = setsOnly ? await readOptionalJson(path.join(tcgOutDir, "summary.json"), null) : null;
@@ -79,13 +81,7 @@ const manifest = existingManifest ?? {
   updatedAt: valuationDate,
   version: Number(valuationDate.replaceAll("-", "")),
   indexes: INDEX_DEFINITIONS.map(({ id, name, file, description, metrics }) => ({ id, name, file, description, metrics })),
-  universes: PRODUCT_UNIVERSES.map((universe) => ({
-    id: universe.id,
-    name: universe.name,
-    tcg,
-    metrics: universe.metrics,
-    universeFile: universeFilePath(universe),
-  })),
+  universes: [],
   indicators: [
     ...PRODUCT_UNIVERSES.map((universe) => ({
       id: universe.id,
@@ -97,7 +93,7 @@ const manifest = existingManifest ?? {
   ],
 };
 
-const setUniverseFiles = await readSetUniverseFiles(indexesDir);
+const setUniverseFiles = await readSetUniverseFiles(universesDir);
 const setIndexDefinitions = setUniverseFiles.flatMap((setUniverse) => buildSetIndexDefinitions(setUniverse));
 const setIndicatorDefinitions = setUniverseFiles.map((setUniverse) => buildSetIndicatorDefinition(setUniverse));
 const setIndexIds = new Set(setIndexDefinitions.map((definition) => definition.id));
@@ -209,7 +205,7 @@ if (!setsOnly) for (const universe of PRODUCT_UNIVERSES) {
     baseProducts: universeData.baseProducts,
     productMeta: universeData.productMeta,
   });
-  await writeCompactJson(path.join(indexesDir, `${universeFile.id}.json`), universeFile);
+  await writeCompactJson(path.join(universesDir, `${universeFile.id}.json`), universeFile);
 }
 
 if (!setsOnly) for (const definition of INDEX_DEFINITIONS) {
@@ -455,6 +451,13 @@ for (const setUniverse of setUniverseFiles) {
 
 manifest.indexes.push(...setIndexDefinitions.map(({ id, name, file, description, metrics }) => ({ id, name, file, description, metrics })));
 manifest.indicators.push(...setIndicatorDefinitions);
+manifest.universes = buildManifestUniverses({
+  existingManifest,
+  setUniverseFiles,
+  universeSnapshots,
+  setsOnly,
+  tcg,
+});
 
 await writeCompactJson(path.join(tcgOutDir, "manifest.json"), manifest);
 await writeCompactJson(path.join(tcgOutDir, "summary.json"), summary);
@@ -527,14 +530,24 @@ function arraysEqual(left, right) {
   return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-async function readSetUniverseFiles(indexesDir) {
-  const manifest = await readOptionalJson(path.join(indexesDir, "set-singles-universes-manifest.json"), { sets: [] });
-  const sets = [];
-  for (const set of manifest.sets ?? []) {
-    const fileName = path.basename(set.file);
-    sets.push(await readJson(path.join(indexesDir, fileName)));
+async function readSetUniverseFiles(universesDir) {
+  let files = [];
+  try {
+    files = await readdir(universesDir);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
   }
-  return sets;
+  const sets = [];
+  for (const fileName of files.filter((file) => file.endsWith(".json")).sort()) {
+    const universe = await readJson(path.join(universesDir, fileName));
+    if (universe.kind === "set-singles-universe") {
+      sets.push(universe);
+    }
+  }
+  return sets.sort((left, right) => {
+    const byName = String(left.name ?? "").localeCompare(String(right.name ?? ""));
+    return byName || String(left.slug ?? left.id).localeCompare(String(right.slug ?? right.id));
+  });
 }
 
 function setUniverseToProductUniverse(setUniverse) {
@@ -543,8 +556,39 @@ function setUniverseToProductUniverse(setUniverse) {
     name: `${setUniverse.name} Singles`,
     metrics: SINGLES_METRICS,
     rebalancePolicy: "fixed-curated",
-    universeFile: `/data/pokemon/indexes/${setUniverse.slug}-singles-universe.json`,
+    universeFile: `/data/pokemon/universes/${setUniverse.slug}-singles-universe.json`,
   };
+}
+
+function buildManifestUniverses({ existingManifest, setUniverseFiles, universeSnapshots, setsOnly, tcg }) {
+  const existingById = new Map((existingManifest?.universes ?? []).map((universe) => [universe.id, universe]));
+  const globalUniverses = PRODUCT_UNIVERSES.map((universe) => {
+    const generatedCount = universeSnapshots[universe.id]?.baseProducts ? Object.keys(universeSnapshots[universe.id].baseProducts).length : null;
+    const existing = existingById.get(universe.id);
+    return {
+      id: universe.id,
+      name: universe.name,
+      tcg,
+      kind: "product-universe",
+      metrics: universe.metrics,
+      universeFile: universeFilePath(universe),
+      count: setsOnly ? existing?.count ?? generatedCount : generatedCount ?? existing?.count ?? null,
+    };
+  });
+  const setUniverses = setUniverseFiles.map((setUniverse) => {
+    const universe = setUniverseToProductUniverse(setUniverse);
+    return {
+      id: universe.id,
+      name: universe.name,
+      tcg,
+      kind: setUniverse.kind,
+      metrics: SINGLES_METRICS,
+      universeFile: universe.universeFile,
+      count: setUniverse.count,
+      curationStatus: setUniverse.curationStatus ?? setUniverse.curation?.status ?? null,
+    };
+  });
+  return [...globalUniverses, ...setUniverses];
 }
 
 function buildSetIndexDefinitions(setUniverse) {

@@ -140,17 +140,15 @@ Generated files are published under `public/data`, which becomes `/data` on GitH
 public/data/pokemon/manifest.json
 public/data/pokemon/summary.json
 public/data/pokemon/indexes/{indexId}.json
-public/data/pokemon/indexes/{universeId}-universe.json
-public/data/pokemon/indexes/set-singles-universes-manifest.json
-public/data/pokemon/indexes/{setSlug}-singles-universe.json
 public/data/pokemon/indicators/{universeId}.json
+public/data/pokemon/universes/{universeId}.json
 ```
 
 Raw Cardmarket downloads are temporary and must not be committed.
 
 ### manifest.json
 
-Lists available indexes and universe files.
+Lists available indexes, indicators, and universe files. This is the only discovery manifest for Pokemon data.
 
 Important fields:
 
@@ -231,7 +229,7 @@ Universe files define which products are included in a product universe.
 Example path:
 
 ```text
-/data/pokemon/indexes/global-singles-universe.json
+/data/pokemon/universes/global-singles-universe.json
 ```
 
 Important fields:
@@ -337,7 +335,7 @@ Machamp is excluded from both Base Set variant universes because it behaves as a
 Example path:
 
 ```text
-/data/pokemon/indexes/base-set-1st-edition-singles-universe.json
+/data/pokemon/universes/base-set-shadowless-singles-universe.json
 ```
 
 Important fields:
@@ -424,12 +422,11 @@ Example files:
 /data/pokemon/manifest.json
 /data/pokemon/summary.json
 /data/pokemon/indexes/global-singles-equal.json
-/data/pokemon/indexes/global-singles-universe.json
-/data/pokemon/indexes/set-singles-universes-manifest.json
-/data/pokemon/indexes/base-set-1st-edition-singles-universe.json
 /data/pokemon/indicators/global-singles.json
 /data/pokemon/indicators/global-booster-boxes.json
 /data/pokemon/indicators/global-booster-packs.json
+/data/pokemon/universes/global-singles-universe.json
+/data/pokemon/universes/base-set-shadowless-singles-universe.json
 ```
 
 A static frontend can fetch `summary.json` first, then lazy-load individual index files and universe files as needed.

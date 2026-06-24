@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const INDEX_DIR = path.join("public", "data", "pokemon", "indexes");
+const UNIVERSE_DIR = path.join("public", "data", "pokemon", "universes");
 
 const EXPECTED_SET_UNIVERSES = {
   "base-set-2-singles-universe.json": 130,
@@ -14,6 +15,10 @@ const EXPECTED_SET_UNIVERSES = {
 };
 
 function readJson(fileName) {
+  return JSON.parse(fs.readFileSync(path.join(UNIVERSE_DIR, fileName), "utf8"));
+}
+
+function readIndex(fileName) {
   return JSON.parse(fs.readFileSync(path.join(INDEX_DIR, fileName), "utf8"));
 }
 
@@ -24,11 +29,13 @@ function readIndicator(fileName) {
 describe("curated WOTC set universes", () => {
   it("publishes only the approved WOTC set universe files plus the global singles universe", () => {
     const files = fs
-      .readdirSync(INDEX_DIR)
+      .readdirSync(UNIVERSE_DIR)
       .filter((fileName) => fileName.endsWith("singles-universe.json"))
       .sort();
 
     expect(files).toEqual(["global-singles-universe.json", ...Object.keys(EXPECTED_SET_UNIVERSES)].sort());
+    expect(fs.readdirSync(INDEX_DIR).filter((fileName) => fileName.endsWith("-universe.json"))).toEqual([]);
+    expect(fs.existsSync(path.join(INDEX_DIR, "set-singles-universes-manifest.json"))).toBe(false);
   });
 
   it("keeps curated universe counts and unique product ids stable", () => {
@@ -44,7 +51,7 @@ describe("curated WOTC set universes", () => {
   });
 
   it("does not publish unsupported Base Set 1st Edition or Machamp in Base Set variants", () => {
-    expect(fs.existsSync(path.join(INDEX_DIR, "base-set-1st-edition-singles-universe.json"))).toBe(false);
+    expect(fs.existsSync(path.join(UNIVERSE_DIR, "base-set-1st-edition-singles-universe.json"))).toBe(false);
 
     for (const fileName of ["base-set-unlimited-singles-universe.json", "base-set-shadowless-singles-universe.json"]) {
       const universe = readJson(fileName);
@@ -53,22 +60,25 @@ describe("curated WOTC set universes", () => {
     }
   });
 
-  it("lists the curated set universes in the discovery manifest", () => {
-    const manifest = readJson("set-singles-universes-manifest.json");
+  it("lists all universes in the Pokemon discovery manifest", () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join("public", "data", "pokemon", "manifest.json"), "utf8"));
+    const expectedUniverseFiles = [
+      "global-singles-universe.json",
+      "global-booster-boxes-universe.json",
+      "global-booster-packs-universe.json",
+      ...Object.keys(EXPECTED_SET_UNIVERSES),
+    ].map((fileName) => `/data/pokemon/universes/${fileName}`);
 
-    expect(manifest.curationPolicy).toBe("curated-wotc-only");
-    expect(manifest.sets.map((set) => set.file).sort()).toEqual(
-      Object.keys(EXPECTED_SET_UNIVERSES)
-        .map((fileName) => `/data/pokemon/indexes/${fileName}`)
-        .sort(),
-    );
+    expect(manifest.universes).toHaveLength(9);
+    expect(manifest.universes.map((universe) => universe.universeFile).sort()).toEqual(expectedUniverseFiles.sort());
+    expect(manifest.universes.every((universe) => universe.universeFile.startsWith("/data/pokemon/universes/"))).toBe(true);
   });
 
   it("generates initial set price indexes and indicators from the fixed universes", () => {
     for (const fileName of Object.keys(EXPECTED_SET_UNIVERSES)) {
       const slug = fileName.replace("-singles-universe.json", "");
-      const equal = readJson(`${slug}-singles-equal.json`);
-      const market = readJson(`${slug}-singles-market.json`);
+      const equal = readIndex(`${slug}-singles-equal.json`);
+      const market = readIndex(`${slug}-singles-market.json`);
       const indicator = readIndicator(`${slug}-singles.json`);
 
       expect(equal.metrics).toEqual(["avg1", "avg7", "avg30", "avg", "low", "trend"]);
@@ -80,7 +90,7 @@ describe("curated WOTC set universes", () => {
   });
 
   it("keeps Base Set Shadowless fixed while excluding missing metric products only for that metric", () => {
-    const equal = readJson("base-set-shadowless-singles-equal.json");
+    const equal = readIndex("base-set-shadowless-singles-equal.json");
 
     expect(equal.composition.matchedProducts).toBe(102);
     expect(equal.composition.activeProductsByMetric).toEqual({
@@ -108,5 +118,18 @@ describe("curated WOTC set universes", () => {
     expect(summary.indexes.map((index) => index.id)).toEqual(expect.arrayContaining(expectedIndexIds));
     expect(manifest.indicators.map((indicator) => indicator.id)).toEqual(expect.arrayContaining(expectedIndicatorIds));
     expect(summary.indicators.map((indicator) => indicator.id)).toEqual(expect.arrayContaining(expectedIndicatorIds));
+  });
+
+  it("points generated compositions at the shared universes folder", () => {
+    for (const fileName of Object.keys(EXPECTED_SET_UNIVERSES)) {
+      const slug = fileName.replace("-singles-universe.json", "");
+      const equal = readIndex(`${slug}-singles-equal.json`);
+      const market = readIndex(`${slug}-singles-market.json`);
+      const indicator = readIndicator(`${slug}-singles.json`);
+
+      expect(equal.composition.universeFile).toBe(`/data/pokemon/universes/${fileName}`);
+      expect(market.composition.universeFile).toBe(`/data/pokemon/universes/${fileName}`);
+      expect(indicator.composition.universeFile).toBe(`/data/pokemon/universes/${fileName}`);
+    }
   });
 });

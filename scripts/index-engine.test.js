@@ -81,7 +81,7 @@ describe("index engine", () => {
     expect(INDEX_DEFINITIONS[0].metrics).toEqual(SINGLES_METRICS);
     expect(INDEX_DEFINITIONS[2].metrics).toEqual(SEALED_METRICS);
     expect(INDEX_DEFINITIONS[0].file).toBe("/data/pokemon/indexes/global-singles-equal.json");
-    expect(universeFilePath(PRODUCT_UNIVERSES[0])).toBe("/data/pokemon/indexes/global-singles-universe.json");
+    expect(universeFilePath(PRODUCT_UNIVERSES[0])).toBe("/data/pokemon/universes/global-singles-universe.json");
   });
 
   it("parses the valuation date from the price guide timestamp", () => {

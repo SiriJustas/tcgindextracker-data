@@ -69,16 +69,15 @@ jobs:
             "public/data/pokemon/indexes/global-booster-boxes-market.json",
             "public/data/pokemon/indexes/global-booster-packs-equal.json",
             "public/data/pokemon/indexes/global-booster-packs-market.json",
-            "public/data/pokemon/indexes/global-singles-universe.json",
-            "public/data/pokemon/indexes/global-booster-boxes-universe.json",
-            "public/data/pokemon/indexes/global-booster-packs-universe.json",
-            "public/data/pokemon/indexes/base-set-unlimited-singles-universe.json",
-            "public/data/pokemon/indexes/base-set-shadowless-singles-universe.json",
-            "public/data/pokemon/indexes/jungle-singles-universe.json",
-            "public/data/pokemon/indexes/fossil-singles-universe.json",
-            "public/data/pokemon/indexes/base-set-2-singles-universe.json",
-            "public/data/pokemon/indexes/team-rocket-singles-universe.json",
-            "public/data/pokemon/indexes/set-singles-universes-manifest.json",
+            "public/data/pokemon/universes/global-singles-universe.json",
+            "public/data/pokemon/universes/global-booster-boxes-universe.json",
+            "public/data/pokemon/universes/global-booster-packs-universe.json",
+            "public/data/pokemon/universes/base-set-unlimited-singles-universe.json",
+            "public/data/pokemon/universes/base-set-shadowless-singles-universe.json",
+            "public/data/pokemon/universes/jungle-singles-universe.json",
+            "public/data/pokemon/universes/fossil-singles-universe.json",
+            "public/data/pokemon/universes/base-set-2-singles-universe.json",
+            "public/data/pokemon/universes/team-rocket-singles-universe.json",
             "public/data/pokemon/indexes/base-set-unlimited-singles-equal.json",
             "public/data/pokemon/indexes/base-set-unlimited-singles-market.json",
             "public/data/pokemon/indexes/base-set-shadowless-singles-equal.json",
@@ -138,6 +137,14 @@ jobs:
           if (!Array.isArray(manifest.indicators) || manifest.indicators.length !== 9) {
             throw new Error("manifest.json must list exactly nine indicator files");
           }
+          if (!Array.isArray(manifest.universes) || manifest.universes.length !== 9) {
+            throw new Error("manifest.json must list exactly nine universes");
+          }
+          for (const universe of manifest.universes) {
+            if (!String(universe.universeFile ?? "").startsWith("/data/pokemon/universes/")) {
+              throw new Error(`manifest universe has unexpected universeFile: ${universe.universeFile}`);
+            }
+          }
 
           const summary = readJson("public/data/pokemon/summary.json");
           if (!Array.isArray(summary.indexes) || summary.indexes.length !== 18) {
@@ -161,14 +168,14 @@ jobs:
 
           assertMetrics("public/data/pokemon/indexes/global-singles-equal.json", singlesMetrics);
           assertMetrics("public/data/pokemon/indexes/global-singles-market.json", singlesMetrics);
-          assertMetrics("public/data/pokemon/indexes/global-singles-universe.json", singlesMetrics);
+          assertMetrics("public/data/pokemon/universes/global-singles-universe.json", singlesMetrics);
           for (const file of [
             "public/data/pokemon/indexes/global-booster-boxes-equal.json",
             "public/data/pokemon/indexes/global-booster-boxes-market.json",
-            "public/data/pokemon/indexes/global-booster-boxes-universe.json",
+            "public/data/pokemon/universes/global-booster-boxes-universe.json",
             "public/data/pokemon/indexes/global-booster-packs-equal.json",
             "public/data/pokemon/indexes/global-booster-packs-market.json",
-            "public/data/pokemon/indexes/global-booster-packs-universe.json",
+            "public/data/pokemon/universes/global-booster-packs-universe.json",
           ]) {
             assertMetrics(file, sealedMetrics);
           }
@@ -206,11 +213,18 @@ jobs:
 
           const indexDir = "public/data/pokemon/indexes";
           for (const name of fs.readdirSync(indexDir)) {
+            if (name.endsWith("-universe.json") || name === "set-singles-universes-manifest.json") {
+              throw new Error(`Universe file must not remain in indexes folder: ${name}`);
+            }
             if (name.endsWith(".json")) readJson(path.join(indexDir, name));
           }
           const indicatorDir = "public/data/pokemon/indicators";
           for (const name of fs.readdirSync(indicatorDir)) {
             if (name.endsWith(".json")) readJson(path.join(indicatorDir, name));
+          }
+          const universeDir = "public/data/pokemon/universes";
+          for (const name of fs.readdirSync(universeDir)) {
+            if (name.endsWith(".json")) readJson(path.join(universeDir, name));
           }
           NODE
 
