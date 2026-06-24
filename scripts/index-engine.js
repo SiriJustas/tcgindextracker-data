@@ -1,6 +1,7 @@
 export const SINGLES_METRICS = ["avg1", "avg7", "avg30", "avg", "low", "trend"];
 export const SEALED_METRICS = ["avg", "low", "trend"];
-export const INDICATOR_METRICS = ["advanceDecline", "percentAbove30d", "heat", "dispersion"];
+export const WINDOW_INDICATOR_METRICS = ["advanceDecline", "percentAbove30d", "heat", "dispersion"];
+export const TREND_INDICATOR_METRICS = ["advanceDeclineTrend", "percentAboveTrend", "trendHeat", "floorStrength", "spread", "trendDispersion"];
 
 export const PRODUCT_UNIVERSES = [
   {
@@ -16,27 +17,27 @@ export const PRODUCT_UNIVERSES = [
     rebalancePolicy: "monthly-chain-linked",
   },
   {
-    id: "booster-boxes",
-    name: "Booster Boxes",
+    id: "global-booster-boxes",
+    name: "Global Booster Boxes",
     categoryId: 53,
     source: "nonSingles",
     metrics: SEALED_METRICS,
     description: "Pokemon booster boxes and displays.",
     itemLabel: "Pokemon booster box/display",
     matcher: "boosterBoxes",
-    universeSlug: "booster-boxes",
+    universeSlug: "global-booster-boxes",
     rebalancePolicy: "monthly-chain-linked",
   },
   {
-    id: "booster-packs",
-    name: "Booster Packs",
+    id: "global-booster-packs",
+    name: "Global Booster Packs",
     categoryId: 52,
     source: "nonSingles",
     metrics: SEALED_METRICS,
     description: "Pokemon individual booster packs.",
     itemLabel: "Pokemon booster pack",
     matcher: "boosterPacks",
-    universeSlug: "booster-packs",
+    universeSlug: "global-booster-packs",
     rebalancePolicy: "monthly-chain-linked",
   },
 ];
@@ -435,21 +436,18 @@ function metricEligibleIds(baseProducts, metric, metrics = SINGLES_METRICS) {
 }
 
 export function buildIndicatorFile({ universe, updatedAt, baseDate, snapshot, baseProducts, existing = null, rebalanceEvent = null, rebalances = [] }) {
-  const point = buildIndicatorPoint(updatedAt, snapshot, baseProducts);
-  const points = upsertPoint(existing?.points ?? [], point);
+  const metrics = indicatorMetricsForUniverse(universe);
+  const point = buildIndicatorPoint(updatedAt, snapshot, baseProducts, universe);
+  const normalizedExisting = normalizeIndicatorHistory(existing, metrics);
+  const points = upsertPoint(normalizedExisting.points, point);
   return {
     id: universe.id,
     name: `${universe.name} Market Indicators`,
     tcg: "pokemon",
     universe: universe.id,
     updatedAt,
-    metrics: INDICATOR_METRICS,
-    units: {
-      advanceDecline: "ratio",
-      percentAbove30d: "percent",
-      heat: "score",
-      dispersion: "percent",
-    },
+    metrics,
+    units: indicatorUnits(metrics),
     composition: {
       universeFile: universeFilePath(universe),
       universePolicy: universe.rebalancePolicy,
@@ -457,20 +455,51 @@ export function buildIndicatorFile({ universe, updatedAt, baseDate, snapshot, ba
       rebalanceCount: rebalances.length,
     },
     diagnostics: {
-      ...(existing?.diagnostics ?? {}),
-      [updatedAt]: buildIndicatorDiagnostics(snapshot, baseProducts, rebalanceEvent),
+      ...normalizedExisting.diagnostics,
+      [updatedAt]: buildIndicatorDiagnostics(snapshot, baseProducts, rebalanceEvent, universe),
     },
     points,
   };
 }
 
-export function buildIndicatorPoint(date, snapshot, baseProducts) {
-  const indicators = calculateSinglesIndicators(snapshot, baseProducts);
-  return [date, ...INDICATOR_METRICS.map((metric) => indicators[metric])];
+function normalizeIndicatorHistory(existing, metrics) {
+  const existingMetrics = Array.isArray(existing?.metrics) ? existing.metrics : [];
+  const existingPoints = Array.isArray(existing?.points) ? existing.points : [];
+  if (existingMetrics.length === 0 || existingPoints.length === 0) {
+    return { points: [], diagnostics: {} };
+  }
+
+  const canMapMetrics = existingMetrics.every((metric) => metrics.includes(metric));
+  if (!canMapMetrics) {
+    return { points: [], diagnostics: {} };
+  }
+
+  return {
+    points: existingPoints.map((point) => [
+      point[0],
+      ...metrics.map((metric) => {
+        const oldIndex = existingMetrics.indexOf(metric);
+        return oldIndex === -1 ? null : point[oldIndex + 1] ?? null;
+      }),
+    ]),
+    diagnostics: existing?.diagnostics ?? {},
+  };
 }
 
-export function calculateSinglesIndicators(snapshot, baseProducts) {
-  const rows = indicatorRows(snapshot, baseProducts);
+export function indicatorMetricsForUniverse(universe) {
+  return universe.id === "global-singles" ? [...WINDOW_INDICATOR_METRICS, ...TREND_INDICATOR_METRICS] : TREND_INDICATOR_METRICS;
+}
+
+export function buildIndicatorPoint(date, snapshot, baseProducts, universe = PRODUCT_UNIVERSES[0]) {
+  const indicators = {
+    ...calculateWindowIndicators(snapshot, baseProducts),
+    ...calculateTrendIndicators(snapshot, baseProducts),
+  };
+  return [date, ...indicatorMetricsForUniverse(universe).map((metric) => indicators[metric])];
+}
+
+export function calculateWindowIndicators(snapshot, baseProducts) {
+  const rows = windowIndicatorRows(snapshot, baseProducts);
   const advancers = rows.filter((row) => row.avg1 > row.avg7).length;
   const decliners = rows.filter((row) => row.avg1 < row.avg7).length;
   const above30 = rows.filter((row) => row.avg1 > row.avg30).length;
@@ -485,27 +514,46 @@ export function calculateSinglesIndicators(snapshot, baseProducts) {
   };
 }
 
-function buildIndicatorDiagnostics(snapshot, baseProducts, rebalanceEvent) {
-  const rows = indicatorRows(snapshot, baseProducts);
-  const activeCount = Object.keys(baseProducts ?? {}).length;
-  const advancers = rows.filter((row) => row.avg1 > row.avg7).length;
-  const decliners = rows.filter((row) => row.avg1 < row.avg7).length;
-  const unchanged = rows.filter((row) => row.avg1 === row.avg7).length;
+export function calculateTrendIndicators(snapshot, baseProducts) {
+  const rows = trendIndicatorRows(snapshot, baseProducts);
+  const aboveTrend = rows.filter((row) => row.avg > row.trend).length;
+  const belowTrend = rows.filter((row) => row.avg < row.trend).length;
+  const heatValues = rows.map((row) => row.avg / row.trend);
+  const floorStrengthValues = rows.map((row) => row.low / row.trend);
+  const spreadValues = rows.map((row) => (row.avg - row.low) / row.avg);
+  const trendReturns = rows.map((row) => row.avg / row.trend - 1);
+
   return {
-    activeProducts: activeCount,
-    validProducts: rows.length,
-    unavailableOrInvalidProducts: Math.max(activeCount - rows.length, 0),
-    advanceDecline: {
-      advancers,
-      decliners,
-      unchanged,
-    },
-    rebalance: Boolean(rebalanceEvent),
-    rebalanceDetails: rebalanceEvent,
+    advanceDeclineTrend: belowTrend === 0 ? null : roundIndex(aboveTrend / belowTrend),
+    percentAboveTrend: rows.length === 0 ? null : roundIndex((aboveTrend / rows.length) * 100),
+    trendHeat: heatValues.length === 0 ? null : roundIndex(average(heatValues) * 100),
+    floorStrength: floorStrengthValues.length === 0 ? null : roundIndex(average(floorStrengthValues) * 100),
+    spread: spreadValues.length === 0 ? null : roundIndex(average(spreadValues) * 100),
+    trendDispersion: trendReturns.length === 0 ? null : roundIndex(populationStdDev(trendReturns) * 100),
   };
 }
 
-function indicatorRows(snapshot, baseProducts) {
+function buildIndicatorDiagnostics(snapshot, baseProducts, rebalanceEvent, universe) {
+  const windowRows = windowIndicatorRows(snapshot, baseProducts);
+  const trendRows = trendIndicatorRows(snapshot, baseProducts);
+  const activeCount = Object.keys(baseProducts ?? {}).length;
+  const output = {
+    activeProducts: activeCount,
+    validProducts: trendRows.length,
+    unavailableOrInvalidProducts: Math.max(activeCount - trendRows.length, 0),
+    trendBreadth: trendBreadthCounts(trendRows),
+    rebalance: Boolean(rebalanceEvent),
+    rebalanceDetails: rebalanceEvent,
+  };
+  if (universe.id === "global-singles") {
+    output.windowValidProducts = windowRows.length;
+    output.windowUnavailableOrInvalidProducts = Math.max(activeCount - windowRows.length, 0);
+    output.advanceDecline = windowBreadthCounts(windowRows);
+  }
+  return output;
+}
+
+function windowIndicatorRows(snapshot, baseProducts) {
   return Object.keys(baseProducts ?? {})
     .map((id) => ({
       avg1: readPrice(snapshot[id]?.avg1),
@@ -513,6 +561,48 @@ function indicatorRows(snapshot, baseProducts) {
       avg30: readPrice(snapshot[id]?.avg30),
     }))
     .filter((row) => row.avg1 !== null && row.avg7 !== null && row.avg30 !== null);
+}
+
+function trendIndicatorRows(snapshot, baseProducts) {
+  return Object.keys(baseProducts ?? {})
+    .map((id) => ({
+      avg: readPrice(snapshot[id]?.avg),
+      low: readPrice(snapshot[id]?.low),
+      trend: readPrice(snapshot[id]?.trend),
+    }))
+    .filter((row) => row.avg !== null && row.low !== null && row.trend !== null);
+}
+
+function windowBreadthCounts(rows) {
+  return {
+    advancers: rows.filter((row) => row.avg1 > row.avg7).length,
+    decliners: rows.filter((row) => row.avg1 < row.avg7).length,
+    unchanged: rows.filter((row) => row.avg1 === row.avg7).length,
+  };
+}
+
+function trendBreadthCounts(rows) {
+  return {
+    aboveTrend: rows.filter((row) => row.avg > row.trend).length,
+    belowTrend: rows.filter((row) => row.avg < row.trend).length,
+    equalTrend: rows.filter((row) => row.avg === row.trend).length,
+  };
+}
+
+function indicatorUnits(metrics) {
+  const units = {
+    advanceDecline: "ratio",
+    percentAbove30d: "percent",
+    heat: "score",
+    dispersion: "percent",
+    advanceDeclineTrend: "ratio",
+    percentAboveTrend: "percent",
+    trendHeat: "score",
+    floorStrength: "score",
+    spread: "percent",
+    trendDispersion: "percent",
+  };
+  return Object.fromEntries(metrics.map((metric) => [metric, units[metric]]));
 }
 
 function average(values) {

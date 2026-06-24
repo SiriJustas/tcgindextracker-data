@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   INDEX_DEFINITIONS,
-  INDICATOR_METRICS,
   PRODUCT_UNIVERSES,
   SEALED_METRICS,
   SINGLES_METRICS,
+  TREND_INDICATOR_METRICS,
+  WINDOW_INDICATOR_METRICS,
   assertFreshPriceGuide,
   auditPokemonProducts,
   buildIndicatorFile,
@@ -18,6 +19,7 @@ import {
   ensureBaseState,
   isBoosterBoxDisplay,
   isBoosterPack,
+  indicatorMetricsForUniverse,
   joinPokemonProducts,
   joinPokemonSingles,
   shouldRebalanceUniverse,
@@ -64,13 +66,15 @@ describe("index engine", () => {
     expect(INDEX_DEFINITIONS.map((definition) => definition.id)).toEqual([
       "global-singles-equal",
       "global-singles-market",
-      "booster-boxes-equal",
-      "booster-boxes-market",
-      "booster-packs-equal",
-      "booster-packs-market",
+      "global-booster-boxes-equal",
+      "global-booster-boxes-market",
+      "global-booster-packs-equal",
+      "global-booster-packs-market",
     ]);
     expect(INDEX_DEFINITIONS[0].name).toBe("Global Singles Equal Weight");
     expect(INDEX_DEFINITIONS[1].name).toBe("Global Singles Market Weight");
+    expect(INDEX_DEFINITIONS[2].name).toBe("Global Booster Boxes Equal Weight");
+    expect(INDEX_DEFINITIONS[4].name).toBe("Global Booster Packs Equal Weight");
     expect(INDEX_DEFINITIONS[0].metrics).toEqual(SINGLES_METRICS);
     expect(INDEX_DEFINITIONS[2].metrics).toEqual(SEALED_METRICS);
     expect(INDEX_DEFINITIONS[0].file).toBe("/data/pokemon/indexes/global-singles-equal.json");
@@ -367,11 +371,11 @@ describe("index engine", () => {
     expect(percentChange(points, 1, 1)).toBe(-100);
   });
 
-  it("builds global singles indicator points from avg1, avg7, and avg30", () => {
+  it("builds global singles indicator points from window and trend metrics", () => {
     const snapshot = {
-      1: { avg1: 12, avg7: 10, avg30: 8 },
-      2: { avg1: 9, avg7: 10, avg30: 12 },
-      3: { avg1: 10, avg7: 10, avg30: 10 },
+      1: { avg1: 12, avg7: 10, avg30: 8, avg: 12, low: 8, trend: 10 },
+      2: { avg1: 9, avg7: 10, avg30: 12, avg: 8, low: 4, trend: 10 },
+      3: { avg1: 10, avg7: 10, avg30: 10, avg: 10, low: 9, trend: 10 },
     };
     const baseProducts = {
       1: { avg1: 10, avg7: 10, avg30: 10, avg: 10, low: 8, trend: 9 },
@@ -379,13 +383,42 @@ describe("index engine", () => {
       3: { avg1: 10, avg7: 10, avg30: 10, avg: 10, low: 8, trend: 9 },
     };
 
-    expect(buildIndicatorPoint("2026-06-23", snapshot, baseProducts)).toEqual(["2026-06-23", 1, 33.33, 103, 31.18]);
+    expect(indicatorMetricsForUniverse(PRODUCT_UNIVERSES[0])).toEqual([...WINDOW_INDICATOR_METRICS, ...TREND_INDICATOR_METRICS]);
+    expect(buildIndicatorPoint("2026-06-23", snapshot, baseProducts, PRODUCT_UNIVERSES[0])).toEqual([
+      "2026-06-23",
+      1,
+      33.33,
+      103,
+      31.18,
+      1,
+      33.33,
+      100,
+      70,
+      31.11,
+      16.33,
+    ]);
+  });
+
+  it("builds sealed universe indicator points from avg, low, and trend only", () => {
+    const snapshot = {
+      1: { avg: 12, low: 8, trend: 10 },
+      2: { avg: 8, low: 4, trend: 10 },
+      3: { avg: 10, low: 9, trend: 10 },
+    };
+    const baseProducts = {
+      1: { avg: 10, low: 8, trend: 9 },
+      2: { avg: 10, low: 8, trend: 9 },
+      3: { avg: 10, low: 8, trend: 9 },
+    };
+
+    expect(indicatorMetricsForUniverse(PRODUCT_UNIVERSES[1])).toEqual(TREND_INDICATOR_METRICS);
+    expect(buildIndicatorPoint("2026-06-23", snapshot, baseProducts, PRODUCT_UNIVERSES[1])).toEqual(["2026-06-23", 1, 33.33, 100, 70, 31.11, 16.33]);
   });
 
   it("builds a per-universe indicator file with compact points and diagnostics", () => {
     const snapshot = {
-      1: { avg1: 12, avg7: 10, avg30: 8 },
-      2: { avg1: 9, avg7: 10, avg30: 12 },
+      1: { avg1: 12, avg7: 10, avg30: 8, avg: 12, low: 8, trend: 10 },
+      2: { avg1: 9, avg7: 10, avg30: 12, avg: 8, low: 4, trend: 10 },
     };
     const baseProducts = {
       1: { avg1: 10, avg7: 10, avg30: 10, avg: 10, low: 8, trend: 9 },
@@ -401,9 +434,38 @@ describe("index engine", () => {
       rebalances: [{ date: "2026-06-23" }],
     });
 
-    expect(file.metrics).toEqual(INDICATOR_METRICS);
+    expect(file.metrics).toEqual([...WINDOW_INDICATOR_METRICS, ...TREND_INDICATOR_METRICS]);
     expect(file.points[0][0]).toBe("2026-06-23");
     expect(file.diagnostics["2026-06-23"].rebalance).toBe(true);
     expect(file.diagnostics["2026-06-23"].advanceDecline).toEqual({ advancers: 1, decliners: 1, unchanged: 0 });
+    expect(file.diagnostics["2026-06-23"].trendBreadth).toEqual({ aboveTrend: 1, belowTrend: 1, equalTrend: 0 });
+  });
+
+  it("preserves old global singles indicator history when adding trend metrics", () => {
+    const snapshot = {
+      1: { avg1: 12, avg7: 10, avg30: 8, avg: 12, low: 8, trend: 10 },
+      2: { avg1: 9, avg7: 10, avg30: 12, avg: 8, low: 4, trend: 10 },
+    };
+    const baseProducts = {
+      1: { avg1: 10, avg7: 10, avg30: 10, avg: 10, low: 8, trend: 9 },
+      2: { avg1: 10, avg7: 10, avg30: 10, avg: 10, low: 8, trend: 9 },
+    };
+
+    const file = buildIndicatorFile({
+      universe: PRODUCT_UNIVERSES[0],
+      updatedAt: "2026-06-24",
+      baseDate: "2026-06-23",
+      snapshot,
+      baseProducts,
+      existing: {
+        metrics: WINDOW_INDICATOR_METRICS,
+        diagnostics: { "2026-06-23": { rebalance: false } },
+        points: [["2026-06-23", 1, 33.33, 103, 31.18]],
+      },
+    });
+
+    expect(file.points[0]).toEqual(["2026-06-23", 1, 33.33, 103, 31.18, null, null, null, null, null, null]);
+    expect(file.points[1][0]).toBe("2026-06-24");
+    expect(file.diagnostics["2026-06-23"]).toEqual({ rebalance: false });
   });
 });

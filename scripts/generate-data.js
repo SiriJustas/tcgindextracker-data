@@ -13,6 +13,7 @@ import {
   ensureBaseState,
   buildRebalanceScale,
   buildScaledPoint,
+  indicatorMetricsForUniverse,
   joinPokemonProducts,
   normalizeScaleByMethodMetric,
   percentChange,
@@ -78,13 +79,13 @@ const manifest = {
     universeFile: universeFilePath(universe),
   })),
   indicators: [
-    {
-      id: "global-singles",
-      name: "Global Singles Market Indicators",
-      universe: "global-singles",
-      file: "/data/pokemon/indicators/global-singles.json",
-      metrics: ["advanceDecline", "percentAbove30d", "heat", "dispersion"],
-    },
+    ...PRODUCT_UNIVERSES.map((universe) => ({
+      id: universe.id,
+      name: `${universe.name} Market Indicators`,
+      universe: universe.id,
+      file: `/data/pokemon/indicators/${universe.id}.json`,
+      metrics: indicatorMetricsForUniverse(universe),
+    })),
   ],
 };
 
@@ -172,7 +173,7 @@ for (const universe of PRODUCT_UNIVERSES) {
   console.log(
     `${universe.name}: included ${audit.includedProducts}/${audit.candidateProducts} category products, rejected ${audit.rejectedProducts}, priced ${rows.length}`,
   );
-  if (universe.id === "booster-boxes") {
+  if (universe.id === "global-booster-boxes") {
     console.log("Included Booster Boxes / Displays / Bundles / Sleeved Booster Cases:");
     for (const name of audit.includedNames) {
       console.log(`- ${name}`);
@@ -270,34 +271,35 @@ for (const definition of INDEX_DEFINITIONS) {
   });
 }
 
-const singlesUniverse = PRODUCT_UNIVERSES.find((universe) => universe.id === "global-singles");
-const singlesData = universeSnapshots["global-singles"];
-const indicatorPath = path.join(indicatorsDir, "global-singles.json");
-const existingIndicator = await readOptionalJson(indicatorPath, null);
-const indicatorFile = buildIndicatorFile({
-  universe: singlesUniverse,
-  updatedAt: valuationDate,
-  baseDate: singlesData.baseDate,
-  snapshot: singlesData.snapshot,
-  baseProducts: singlesData.baseProducts,
-  existing: existingIndicator,
-  rebalanceEvent: singlesData.rebalanceEvent,
-  rebalances: singlesData.rebalances,
-});
-await writeCompactJson(indicatorPath, indicatorFile);
+for (const universe of PRODUCT_UNIVERSES) {
+  const universeData = universeSnapshots[universe.id];
+  const indicatorPath = path.join(indicatorsDir, `${universe.id}.json`);
+  const existingIndicator = await readOptionalJson(indicatorPath, null);
+  const indicatorFile = buildIndicatorFile({
+    universe,
+    updatedAt: valuationDate,
+    baseDate: universeData.baseDate,
+    snapshot: universeData.snapshot,
+    baseProducts: universeData.baseProducts,
+    existing: existingIndicator,
+    rebalanceEvent: universeData.rebalanceEvent,
+    rebalances: universeData.rebalances,
+  });
+  await writeCompactJson(indicatorPath, indicatorFile);
 
-const latestIndicator = indicatorFile.points.at(-1);
-summary.indicators.push({
-  id: indicatorFile.id,
-  name: indicatorFile.name,
-  universe: indicatorFile.universe,
-  file: "/data/pokemon/indicators/global-singles.json",
-  metrics: indicatorFile.metrics,
-  latest: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, latestIndicator?.[index + 1] ?? null])),
-  change1d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 1)])),
-  change7d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 7)])),
-  change30d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 30)])),
-});
+  const latestIndicator = indicatorFile.points.at(-1);
+  summary.indicators.push({
+    id: indicatorFile.id,
+    name: indicatorFile.name,
+    universe: indicatorFile.universe,
+    file: `/data/pokemon/indicators/${universe.id}.json`,
+    metrics: indicatorFile.metrics,
+    latest: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, latestIndicator?.[index + 1] ?? null])),
+    change1d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 1)])),
+    change7d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 7)])),
+    change30d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 30)])),
+  });
+}
 
 await writeCompactJson(path.join(tcgOutDir, "manifest.json"), manifest);
 await writeCompactJson(path.join(tcgOutDir, "summary.json"), summary);
@@ -340,7 +342,7 @@ async function writeCompactJson(filePath, value) {
 }
 
 function normalizeUniverseState(state) {
-  if (state?.tcgs?.pokemon?.universes) return state.tcgs.pokemon.universes;
+  if (state?.tcgs?.pokemon?.universes) return migrateUniverseKeys(state.tcgs.pokemon.universes);
   if (state?.universes) return migrateUniverseKeys(state.universes);
   return migrateUniverseKeys({
     "pokemon-singles": {
@@ -353,8 +355,10 @@ function normalizeUniverseState(state) {
 function migrateUniverseKeys(universes) {
   const keyMap = {
     "pokemon-singles": "global-singles",
-    "pokemon-booster-boxes": "booster-boxes",
-    "pokemon-booster-packs": "booster-packs",
+    "pokemon-booster-boxes": "global-booster-boxes",
+    "pokemon-booster-packs": "global-booster-packs",
+    "booster-boxes": "global-booster-boxes",
+    "booster-packs": "global-booster-packs",
   };
   return Object.fromEntries(Object.entries(universes ?? {}).map(([key, value]) => [keyMap[key] ?? key, value]));
 }

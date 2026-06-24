@@ -12,10 +12,10 @@ The current pipeline generates Pokemon indexes:
 
 - `global-singles-equal`
 - `global-singles-market`
-- `booster-boxes-equal`
-- `booster-boxes-market`
-- `booster-packs-equal`
-- `booster-packs-market`
+- `global-booster-boxes-equal`
+- `global-booster-boxes-market`
+- `global-booster-packs-equal`
+- `global-booster-packs-market`
 
 Pokemon data is stored under:
 
@@ -36,18 +36,20 @@ Indexes use the real Cardmarket price fields available for each product type. Th
 
 Global Singles tracks six metrics:
 
-- `avg1` - short-term Cardmarket average price.
-- `avg7` - 7-day Cardmarket average price.
-- `avg30` - 30-day Cardmarket average price.
-- `avg` - Cardmarket average price.
-- `low` - Cardmarket low price.
-- `trend` - Cardmarket trend price.
+- `avg1` - AVG1, the average sale price over the last day.
+- `avg7` - AVG7, the average sale price over the last 7 days.
+- `avg30` - AVG30, the average sale price over the last 30 days.
+- `avg` - Avg. Sell Price, the average sell price as shown in the Cardmarket website chart.
+- `low` - Low Price, the lowest price on the market.
+- `trend` - Trend Price, the trend price as shown on the Cardmarket website.
+
+`avg` is treated as its own official Cardmarket field. It is not assumed to equal `avg1`, `avg7`, or `avg30`.
 
 Booster Boxes and Booster Packs track three sealed-product metrics:
 
-- `avg` - Cardmarket average price.
-- `low` - Cardmarket low price.
-- `trend` - Cardmarket trend price.
+- `avg` - Avg. Sell Price, the average sell price as shown in the Cardmarket website chart.
+- `low` - Low Price, the lowest price on the market.
+- `trend` - Trend Price, the trend price as shown on the Cardmarket website.
 
 Products enter a universe only when every configured metric for that universe is a valid positive number. Missing, zero, negative, or non-numeric prices exclude the product until a future rebalance. This prevents new or poorly priced products from distorting the index the moment they appear.
 
@@ -172,7 +174,7 @@ Each index file contains historical points and diagnostics.
 Example path:
 
 ```text
-/data/pokemon/indexes/booster-boxes-equal.json
+/data/pokemon/indexes/global-booster-boxes-equal.json
 ```
 
 Important fields:
@@ -247,20 +249,36 @@ Entry shape:
 
 Market indicators describe the internal condition of a universe. They are not equal-weight or market-weight price indexes, and they are not chain-linked. They are direct readings of the current active universe.
 
-The first indicator file is generated for Global Singles because singles expose `avg1`, `avg7`, and `avg30`, which are needed for short-term breadth and momentum calculations.
+Global Singles has two indicator families:
 
-Current indicator file:
+- Window indicators based on `avg1`, `avg7`, and `avg30`.
+- Trend/floor indicators based on `avg`, `low`, and `trend`.
+
+Booster Boxes and Booster Packs have trend/floor indicators only, because sealed products do not publish `avg1`, `avg7`, and `avg30`.
+
+Current indicator files:
 
 ```text
 /data/pokemon/indicators/global-singles.json
+/data/pokemon/indicators/global-booster-boxes.json
+/data/pokemon/indicators/global-booster-packs.json
 ```
 
-Indicator metrics:
+Global Singles window metrics:
 
 - `advanceDecline` - products where `avg1 > avg7` divided by products where `avg1 < avg7`.
 - `percentAbove30d` - percentage of products where `avg1 > avg30`.
 - `heat` - average of `0.4 * (avg1 / avg7) + 0.6 * (avg7 / avg30)`, multiplied by `100`.
 - `dispersion` - standard deviation of `(avg1 / avg30) - 1`, multiplied by `100`.
+
+Trend/floor metrics:
+
+- `advanceDeclineTrend` - products where `avg > trend` divided by products where `avg < trend`.
+- `percentAboveTrend` - percentage of products where `avg > trend`.
+- `trendHeat` - average of `avg / trend`, multiplied by `100`.
+- `floorStrength` - average of `low / trend`, multiplied by `100`.
+- `spread` - average of `(avg - low) / avg`, multiplied by `100`.
+- `trendDispersion` - standard deviation of `(avg / trend) - 1`, multiplied by `100`.
 
 Why these exist:
 
@@ -268,19 +286,29 @@ Why these exist:
 - `percentAbove30d` shows how much of the universe is trading above its 30-day average.
 - `heat` combines very short-term and medium-term momentum into one score, where `100` is roughly neutral.
 - `dispersion` shows whether movement is broad and uniform or concentrated in a smaller group of products.
+- `trendHeat` compares the chart average sell price against Cardmarket trend price.
+- `floorStrength` shows how close the market floor is to trend price.
+- `spread` shows the average gap between average sell price and market floor.
+- `trendDispersion` shows whether the avg-vs-trend relationship is consistent across the universe.
 
 Indicators are stored separately from price indexes because they answer a different question. Price indexes track value movement over time; indicators describe market condition and participation.
 
 Point shape:
 
 ```json
-["2026-06-23",1.24,58.42,103.16,7.81]
+["2026-06-23",1.24,58.42,103.16,7.81,1.12,52.9,101.4,63.2,36.8,12.5]
 ```
 
-The order is:
+Global Singles order:
 
 ```text
-[date, advanceDecline, percentAbove30d, heat, dispersion]
+[date, advanceDecline, percentAbove30d, heat, dispersion, advanceDeclineTrend, percentAboveTrend, trendHeat, floorStrength, spread, trendDispersion]
+```
+
+Booster Boxes and Booster Packs order:
+
+```text
+[date, advanceDeclineTrend, percentAboveTrend, trendHeat, floorStrength, spread, trendDispersion]
 ```
 
 ## Data Updates
@@ -307,6 +335,18 @@ The workflow is scheduled at:
 
 That corresponds to 11:17, 15:17, 19:17, and 23:17 Lithuania summer time.
 
+## Cardmarket Data Dependency
+
+This project relies on Cardmarket-published product catalog and price guide files. If Cardmarket data is stale, incomplete, delayed, changed, or incorrect, generated indexes and indicators may also be stale, incomplete, or misleading.
+
+The project does not independently verify trades, listings, liquidity, product metadata, or raw market activity. It calculates transparent derived values from the public data files that Cardmarket publishes.
+
+## Research Only
+
+This project is for research, education, transparency, and market observation only.
+
+It is not financial advice and is not a recommendation to buy, sell, hold, grade, invest, speculate, trade, or make any money-related decision. Trading cards and sealed products can be illiquid, volatile, condition-sensitive, and hard to value accurately.
+
 ## Accessing Data
 
 GitHub Pages project sites use this URL pattern:
@@ -323,6 +363,8 @@ Example files:
 /data/pokemon/indexes/global-singles-equal.json
 /data/pokemon/indexes/global-singles-universe.json
 /data/pokemon/indicators/global-singles.json
+/data/pokemon/indicators/global-booster-boxes.json
+/data/pokemon/indicators/global-booster-packs.json
 ```
 
 A static frontend can fetch `summary.json` first, then lazy-load individual index files and universe files as needed.
@@ -353,7 +395,7 @@ Generate data from downloaded files:
 npm run generate:data
 ```
 
-Generated data is ignored locally by `.gitignore` and should normally be committed only by GitHub Actions.
+Raw downloads and temporary files are ignored by `.gitignore`. Generated `public/data` files are the published dataset and may be committed by GitHub Actions or intentionally committed after a verified local generation.
 
 ## License And Usage
 

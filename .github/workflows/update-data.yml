@@ -65,14 +65,16 @@ jobs:
             "public/data/pokemon/summary.json",
             "public/data/pokemon/indexes/global-singles-equal.json",
             "public/data/pokemon/indexes/global-singles-market.json",
-            "public/data/pokemon/indexes/booster-boxes-equal.json",
-            "public/data/pokemon/indexes/booster-boxes-market.json",
-            "public/data/pokemon/indexes/booster-packs-equal.json",
-            "public/data/pokemon/indexes/booster-packs-market.json",
+            "public/data/pokemon/indexes/global-booster-boxes-equal.json",
+            "public/data/pokemon/indexes/global-booster-boxes-market.json",
+            "public/data/pokemon/indexes/global-booster-packs-equal.json",
+            "public/data/pokemon/indexes/global-booster-packs-market.json",
             "public/data/pokemon/indexes/global-singles-universe.json",
-            "public/data/pokemon/indexes/booster-boxes-universe.json",
-            "public/data/pokemon/indexes/booster-packs-universe.json",
+            "public/data/pokemon/indexes/global-booster-boxes-universe.json",
+            "public/data/pokemon/indexes/global-booster-packs-universe.json",
             "public/data/pokemon/indicators/global-singles.json",
+            "public/data/pokemon/indicators/global-booster-boxes.json",
+            "public/data/pokemon/indicators/global-booster-packs.json",
           ];
 
           const windowsAbsolutePath = /[A-Za-z]:[\\/]/;
@@ -108,21 +110,22 @@ jobs:
           if (!Array.isArray(manifest.indexes) || manifest.indexes.length !== 6) {
             throw new Error("manifest.json must list exactly six indexes");
           }
-          if (!Array.isArray(manifest.indicators) || manifest.indicators.length !== 1) {
-            throw new Error("manifest.json must list exactly one indicator file");
+          if (!Array.isArray(manifest.indicators) || manifest.indicators.length !== 3) {
+            throw new Error("manifest.json must list exactly three indicator files");
           }
 
           const summary = readJson("public/data/pokemon/summary.json");
           if (!Array.isArray(summary.indexes) || summary.indexes.length !== 6) {
             throw new Error("summary.json must list exactly six indexes");
           }
-          if (!Array.isArray(summary.indicators) || summary.indicators.length !== 1) {
-            throw new Error("summary.json must list exactly one indicator summary");
+          if (!Array.isArray(summary.indicators) || summary.indicators.length !== 3) {
+            throw new Error("summary.json must list exactly three indicator summaries");
           }
 
           const singlesMetrics = ["avg1", "avg7", "avg30", "avg", "low", "trend"];
           const sealedMetrics = ["avg", "low", "trend"];
-          const indicatorMetrics = ["advanceDecline", "percentAbove30d", "heat", "dispersion"];
+          const windowIndicatorMetrics = ["advanceDecline", "percentAbove30d", "heat", "dispersion"];
+          const trendIndicatorMetrics = ["advanceDeclineTrend", "percentAboveTrend", "trendHeat", "floorStrength", "spread", "trendDispersion"];
 
           function assertMetrics(file, expected) {
             const data = readJson(file);
@@ -135,16 +138,18 @@ jobs:
           assertMetrics("public/data/pokemon/indexes/global-singles-market.json", singlesMetrics);
           assertMetrics("public/data/pokemon/indexes/global-singles-universe.json", singlesMetrics);
           for (const file of [
-            "public/data/pokemon/indexes/booster-boxes-equal.json",
-            "public/data/pokemon/indexes/booster-boxes-market.json",
-            "public/data/pokemon/indexes/booster-boxes-universe.json",
-            "public/data/pokemon/indexes/booster-packs-equal.json",
-            "public/data/pokemon/indexes/booster-packs-market.json",
-            "public/data/pokemon/indexes/booster-packs-universe.json",
+            "public/data/pokemon/indexes/global-booster-boxes-equal.json",
+            "public/data/pokemon/indexes/global-booster-boxes-market.json",
+            "public/data/pokemon/indexes/global-booster-boxes-universe.json",
+            "public/data/pokemon/indexes/global-booster-packs-equal.json",
+            "public/data/pokemon/indexes/global-booster-packs-market.json",
+            "public/data/pokemon/indexes/global-booster-packs-universe.json",
           ]) {
             assertMetrics(file, sealedMetrics);
           }
-          assertMetrics("public/data/pokemon/indicators/global-singles.json", indicatorMetrics);
+          assertMetrics("public/data/pokemon/indicators/global-singles.json", [...windowIndicatorMetrics, ...trendIndicatorMetrics]);
+          assertMetrics("public/data/pokemon/indicators/global-booster-boxes.json", trendIndicatorMetrics);
+          assertMetrics("public/data/pokemon/indicators/global-booster-packs.json", trendIndicatorMetrics);
 
           const indexDir = "public/data/pokemon/indexes";
           for (const name of fs.readdirSync(indexDir)) {
