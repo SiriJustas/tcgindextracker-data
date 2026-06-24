@@ -72,9 +72,34 @@ jobs:
             "public/data/pokemon/indexes/global-singles-universe.json",
             "public/data/pokemon/indexes/global-booster-boxes-universe.json",
             "public/data/pokemon/indexes/global-booster-packs-universe.json",
+            "public/data/pokemon/indexes/base-set-unlimited-singles-universe.json",
+            "public/data/pokemon/indexes/base-set-shadowless-singles-universe.json",
+            "public/data/pokemon/indexes/jungle-singles-universe.json",
+            "public/data/pokemon/indexes/fossil-singles-universe.json",
+            "public/data/pokemon/indexes/base-set-2-singles-universe.json",
+            "public/data/pokemon/indexes/team-rocket-singles-universe.json",
+            "public/data/pokemon/indexes/set-singles-universes-manifest.json",
+            "public/data/pokemon/indexes/base-set-unlimited-singles-equal.json",
+            "public/data/pokemon/indexes/base-set-unlimited-singles-market.json",
+            "public/data/pokemon/indexes/base-set-shadowless-singles-equal.json",
+            "public/data/pokemon/indexes/base-set-shadowless-singles-market.json",
+            "public/data/pokemon/indexes/jungle-singles-equal.json",
+            "public/data/pokemon/indexes/jungle-singles-market.json",
+            "public/data/pokemon/indexes/fossil-singles-equal.json",
+            "public/data/pokemon/indexes/fossil-singles-market.json",
+            "public/data/pokemon/indexes/base-set-2-singles-equal.json",
+            "public/data/pokemon/indexes/base-set-2-singles-market.json",
+            "public/data/pokemon/indexes/team-rocket-singles-equal.json",
+            "public/data/pokemon/indexes/team-rocket-singles-market.json",
             "public/data/pokemon/indicators/global-singles.json",
             "public/data/pokemon/indicators/global-booster-boxes.json",
             "public/data/pokemon/indicators/global-booster-packs.json",
+            "public/data/pokemon/indicators/base-set-unlimited-singles.json",
+            "public/data/pokemon/indicators/base-set-shadowless-singles.json",
+            "public/data/pokemon/indicators/jungle-singles.json",
+            "public/data/pokemon/indicators/fossil-singles.json",
+            "public/data/pokemon/indicators/base-set-2-singles.json",
+            "public/data/pokemon/indicators/team-rocket-singles.json",
           ];
 
           const windowsAbsolutePath = /[A-Za-z]:[\\/]/;
@@ -107,19 +132,19 @@ jobs:
           for (const file of requiredFiles) readJson(file);
 
           const manifest = readJson("public/data/pokemon/manifest.json");
-          if (!Array.isArray(manifest.indexes) || manifest.indexes.length !== 6) {
-            throw new Error("manifest.json must list exactly six indexes");
+          if (!Array.isArray(manifest.indexes) || manifest.indexes.length !== 18) {
+            throw new Error("manifest.json must list exactly eighteen indexes");
           }
-          if (!Array.isArray(manifest.indicators) || manifest.indicators.length !== 3) {
-            throw new Error("manifest.json must list exactly three indicator files");
+          if (!Array.isArray(manifest.indicators) || manifest.indicators.length !== 9) {
+            throw new Error("manifest.json must list exactly nine indicator files");
           }
 
           const summary = readJson("public/data/pokemon/summary.json");
-          if (!Array.isArray(summary.indexes) || summary.indexes.length !== 6) {
-            throw new Error("summary.json must list exactly six indexes");
+          if (!Array.isArray(summary.indexes) || summary.indexes.length !== 18) {
+            throw new Error("summary.json must list exactly eighteen indexes");
           }
-          if (!Array.isArray(summary.indicators) || summary.indicators.length !== 3) {
-            throw new Error("summary.json must list exactly three indicator summaries");
+          if (!Array.isArray(summary.indicators) || summary.indicators.length !== 9) {
+            throw new Error("summary.json must list exactly nine indicator summaries");
           }
 
           const singlesMetrics = ["avg1", "avg7", "avg30", "avg", "low", "trend"];
@@ -150,6 +175,34 @@ jobs:
           assertMetrics("public/data/pokemon/indicators/global-singles.json", [...windowIndicatorMetrics, ...trendIndicatorMetrics]);
           assertMetrics("public/data/pokemon/indicators/global-booster-boxes.json", trendIndicatorMetrics);
           assertMetrics("public/data/pokemon/indicators/global-booster-packs.json", trendIndicatorMetrics);
+
+          for (const file of [
+            "public/data/pokemon/indexes/base-set-unlimited-singles-equal.json",
+            "public/data/pokemon/indexes/base-set-unlimited-singles-market.json",
+            "public/data/pokemon/indexes/base-set-shadowless-singles-equal.json",
+            "public/data/pokemon/indexes/base-set-shadowless-singles-market.json",
+            "public/data/pokemon/indexes/jungle-singles-equal.json",
+            "public/data/pokemon/indexes/jungle-singles-market.json",
+            "public/data/pokemon/indexes/fossil-singles-equal.json",
+            "public/data/pokemon/indexes/fossil-singles-market.json",
+            "public/data/pokemon/indexes/base-set-2-singles-equal.json",
+            "public/data/pokemon/indexes/base-set-2-singles-market.json",
+            "public/data/pokemon/indexes/team-rocket-singles-equal.json",
+            "public/data/pokemon/indexes/team-rocket-singles-market.json",
+          ]) {
+            assertMetrics(file, singlesMetrics);
+          }
+
+          for (const file of [
+            "public/data/pokemon/indicators/base-set-unlimited-singles.json",
+            "public/data/pokemon/indicators/base-set-shadowless-singles.json",
+            "public/data/pokemon/indicators/jungle-singles.json",
+            "public/data/pokemon/indicators/fossil-singles.json",
+            "public/data/pokemon/indicators/base-set-2-singles.json",
+            "public/data/pokemon/indicators/team-rocket-singles.json",
+          ]) {
+            assertMetrics(file, [...windowIndicatorMetrics, ...trendIndicatorMetrics]);
+          }
 
           const indexDir = "public/data/pokemon/indexes";
           for (const name of fs.readdirSync(indexDir)) {
