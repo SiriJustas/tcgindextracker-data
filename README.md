@@ -19,9 +19,15 @@ The Pokemon dataset currently includes:
 - global singles indexes
 - global booster box indexes
 - global booster pack indexes
-- curated WOTC-era set singles indexes
-- market indicators
-- universe files for membership/audit data
+- curated Pokemon set singles indexes
+- market indicators for every published universe
+- universe files for membership and audit data
+
+Current generated scale:
+
+- 160 universes
+- 320 price indexes
+- 160 market indicator files
 
 Future TCGs can use the same layout:
 
@@ -87,3 +93,9 @@ This project is for research, education, transparency, and market observation on
 This project relies on Cardmarket-published source files. If Cardmarket data is stale, incomplete, delayed, changed, or incorrect, generated indexes and indicators may also be stale, incomplete, or misleading.
 
 This project is not affiliated with or endorsed by Cardmarket, Pokemon, Nintendo, Creatures, GAME FREAK, Wizards of the Coast, Konami, or any other rights holder.
+
+## Support
+
+If this project is useful to you, you can support ongoing development here:
+
+[Support TCG Index Tracker on Ko-fi](https://ko-fi.com/sirijus)

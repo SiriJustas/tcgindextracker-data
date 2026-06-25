@@ -14,6 +14,8 @@ GitHub Actions updates and publishes the data.
 8. Commit generated `public/data`, `.index-state/state.json`, and optional audit outputs.
 9. Deploy `public` to GitHub Pages.
 
+Validation checks the generated file layout, expected metric lists, required manifest/summary counts, JSON parseability, and absence of removed metric names or local filesystem paths.
+
 The workflow currently runs at:
 
 ```text

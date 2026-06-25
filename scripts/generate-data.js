@@ -20,6 +20,7 @@ import {
   indicatorMetricsForUniverse,
   joinPokemonProducts,
   normalizeScaleByMethodMetric,
+  normalizePriceHistory,
   percentChange,
   shouldRebalanceUniverse,
   summarizeRebalance,
@@ -94,6 +95,15 @@ const manifest = existingManifest ?? {
 };
 
 const setUniverseFiles = await readSetUniverseFiles(universesDir);
+for (const setUniverse of setUniverseFiles) {
+  if (!arraysEqual(setUniverse.metrics, SINGLES_METRICS)) {
+    await writeCompactJson(path.join(universesDir, `${setUniverse.slug}-singles-universe.json`), {
+      ...setUniverse,
+      metrics: SINGLES_METRICS,
+    });
+    setUniverse.metrics = SINGLES_METRICS;
+  }
+}
 const setIndexDefinitions = setUniverseFiles.flatMap((setUniverse) => buildSetIndexDefinitions(setUniverse));
 const setIndicatorDefinitions = setUniverseFiles.map((setUniverse) => buildSetIndicatorDefinition(setUniverse));
 const setIndexIds = new Set(setIndexDefinitions.map((definition) => definition.id));
@@ -156,7 +166,7 @@ if (!setsOnly) for (const universe of PRODUCT_UNIVERSES) {
     quality[metric].activeProducts = activeProductsByMetric(baseProducts, metrics)[metric];
   }
 
-  const rebalances = upsertRebalanceEvent(previousUniverseState.rebalances ?? [], rebalanceEvent);
+  const rebalances = upsertRebalanceEvent(sanitizeRebalances(previousUniverseState.rebalances ?? [], metrics), rebalanceEvent);
 
   nextUniverses[universe.id] = {
     products: state.products,
@@ -214,7 +224,7 @@ if (!setsOnly) for (const definition of INDEX_DEFINITIONS) {
   const universeData = universeSnapshots[definition.universeId];
   const indexPath = path.join(indexesDir, `${definition.id}.json`);
   const existing = await readOptionalJson(indexPath, null);
-  const existingCompatible = arraysEqual(existing?.metrics, metrics) ? existing : null;
+  const existingCompatible = normalizePriceHistory(existing, metrics);
   const point = buildScaledPoint(
     definition.method,
     valuationDate,
@@ -223,9 +233,9 @@ if (!setsOnly) for (const definition of INDEX_DEFINITIONS) {
     universeData.scaleByMethodMetric[definition.method],
     metrics,
   );
-  const points = upsertPoint(existingCompatible?.points ?? [], point);
+  const points = upsertPoint(existingCompatible.points, point);
   const diagnostics = {
-    ...(existingCompatible?.diagnostics ?? {}),
+    ...existingCompatible.diagnostics,
     [valuationDate]: {
       sourceCreatedAt: {
         products: universeData.sourceCreatedAt,
@@ -247,7 +257,7 @@ if (!setsOnly) for (const definition of INDEX_DEFINITIONS) {
     id: definition.id,
     name: definition.name,
     currency: "EUR",
-    baseDate: existingCompatible?.baseDate ?? valuationDate,
+    baseDate: existingCompatible.baseDate ?? valuationDate,
     baseValue: 100,
     updatedAt: valuationDate,
     metrics,
@@ -346,7 +356,7 @@ for (const setUniverse of setUniverseFiles) {
     snapshotData.quality[metric].activeProducts = activeByMetric[metric];
   }
   const baseDate = previousUniverseState.baseDate ?? valuationDate;
-  const rebalances = upsertMetricRebalances(previousUniverseState.rebalances ?? [], valuationDate, metricRebalances);
+  const rebalances = upsertMetricRebalances(sanitizeRebalances(previousUniverseState.rebalances ?? [], SINGLES_METRICS), valuationDate, metricRebalances);
 
   nextUniverses[universe.id] = {
     products: snapshotData.state.products,
@@ -363,7 +373,7 @@ for (const setUniverse of setUniverseFiles) {
   for (const definition of buildSetIndexDefinitions(setUniverse)) {
     const indexPath = path.join(indexesDir, `${definition.id}.json`);
     const existing = await readOptionalJson(indexPath, null);
-    const existingCompatible = arraysEqual(existing?.metrics, SINGLES_METRICS) ? existing : null;
+    const existingCompatible = normalizePriceHistory(existing, SINGLES_METRICS);
     const point = buildScaledPoint(
       definition.method,
       valuationDate,
@@ -372,9 +382,9 @@ for (const setUniverse of setUniverseFiles) {
       scaleByMethodMetric[definition.method],
       SINGLES_METRICS,
     );
-    const points = upsertPoint(existingCompatible?.points ?? [], point);
+    const points = upsertPoint(existingCompatible.points, point);
     const diagnostics = {
-      ...(existingCompatible?.diagnostics ?? {}),
+      ...existingCompatible.diagnostics,
       [valuationDate]: {
         sourceCreatedAt: {
           products: setUniverse.source?.productsCreatedAt ?? null,
@@ -389,7 +399,7 @@ for (const setUniverse of setUniverseFiles) {
       id: definition.id,
       name: definition.name,
       currency: "EUR",
-      baseDate: existingCompatible?.baseDate ?? valuationDate,
+      baseDate: existingCompatible.baseDate ?? valuationDate,
       baseValue: 100,
       updatedAt: valuationDate,
       metrics: SINGLES_METRICS,
@@ -653,4 +663,18 @@ function upsertMetricRebalances(events, date, metricRebalances) {
       metrics: metricRebalances,
     },
   ].sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function sanitizeRebalances(events, metrics) {
+  const allowed = new Set(metrics);
+  return (events ?? []).map((event) => {
+    const next = { ...event };
+    if (event?.summary && typeof event.summary === "object") {
+      next.summary = Object.fromEntries(Object.entries(event.summary).filter(([metric]) => allowed.has(metric)));
+    }
+    if (event?.metrics && typeof event.metrics === "object") {
+      next.metrics = Object.fromEntries(Object.entries(event.metrics).filter(([metric]) => allowed.has(metric)));
+    }
+    return next;
+  });
 }

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const INDEX_DIR = path.join("public", "data", "pokemon", "indexes");
 const UNIVERSE_DIR = path.join("public", "data", "pokemon", "universes");
 const INDICATOR_DIR = path.join("public", "data", "pokemon", "indicators");
-const SET_METRICS = ["avg1", "avg7", "avg30", "avg", "low", "trend"];
+const SET_METRICS = ["avg", "low", "trend"];
 const GLOBAL_UNIVERSE_FILES = ["global-singles-universe.json", "global-booster-boxes-universe.json", "global-booster-packs-universe.json"];
 
 const REQUIRED_NEW_UNIVERSES = [
@@ -210,8 +210,8 @@ describe("curated Pokemon set universes", () => {
       expect(market.metrics).toEqual(SET_METRICS);
       expect(equal.points[0][0]).toBe("2026-06-23");
       expect(market.points[0][0]).toBe("2026-06-23");
-      expect(equal.points[0]).toHaveLength(7);
-      expect(market.points[0]).toHaveLength(7);
+      expect(equal.points[0]).toHaveLength(4);
+      expect(market.points[0]).toHaveLength(4);
       expect(equal.points[0].slice(1).every((value) => typeof value === "number")).toBe(true);
       expect(market.points[0].slice(1).every((value) => typeof value === "number")).toBe(true);
       expect(indicator.points[0][0]).toBe("2026-06-23");
@@ -222,16 +222,12 @@ describe("curated Pokemon set universes", () => {
     const equal = readIndex("base-set-shadowless-singles-equal.json");
 
     expect(equal.composition.matchedProducts).toBe(103);
-    expect(equal.composition.activeProductsByMetric).toEqual({
-      avg1: 103,
-      avg7: 103,
-      avg30: 103,
-      avg: 101,
-      low: 103,
-      trend: 103,
-    });
-    expect(equal.diagnostics["2026-06-23"].quality.avg.missing).toBe(2);
-    expect(equal.diagnostics["2026-06-23"].quality.avg1.missing).toBe(0);
+    expect(Object.keys(equal.composition.activeProductsByMetric)).toEqual(SET_METRICS);
+    expect(equal.composition.activeProductsByMetric.avg).toBe(101);
+    expect(equal.composition.activeProductsByMetric.low).toBe(103);
+    expect(equal.composition.activeProductsByMetric.trend).toBe(103);
+    expect(equal.composition.missingProductsByMetric.avg).toBe(2);
+    expect(equal.composition.missingProductsByMetric.avg1).toBeUndefined();
   });
 
   it("publishes set indexes and indicators through Pokemon manifest and summary", () => {

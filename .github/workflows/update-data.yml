@@ -138,10 +138,20 @@ jobs:
             return path.join("public", publicPath.slice(1));
           }
 
-          const singlesMetrics = ["avg1", "avg7", "avg30", "avg", "low", "trend"];
-          const sealedMetrics = ["avg", "low", "trend"];
-          const windowIndicatorMetrics = ["advanceDecline", "percentAbove30d", "heat", "dispersion"];
-          const trendIndicatorMetrics = ["advanceDeclineTrend", "percentAboveTrend", "trendHeat", "floorStrength", "spread", "trendDispersion"];
+          const priceMetrics = ["avg", "low", "trend"];
+          const trendIndicatorMetrics = [
+            "advanceDeclineTrend",
+            "percentAboveTrend",
+            "trendHeat",
+            "floorStrength",
+            "spread",
+            "trendDispersion",
+            "netTrendBreadth",
+            "marketWeightedPercentAboveTrend",
+            "medianTrendHeat",
+            "weakFloorPercent",
+          ];
+          const removedNames = new Set(["avg1", "avg7", "avg30", "advanceDecline", "percentAbove30d", "heat", "dispersion"]);
 
           function sameMetrics(actual, expected) {
             return JSON.stringify(actual) === JSON.stringify(expected);
@@ -151,6 +161,17 @@ jobs:
             const data = readJson(file);
             if (!sameMetrics(data.metrics, expected)) {
               throw new Error(`${file} has unexpected metrics`);
+            }
+            assertNoRemovedMetricNames(data, file);
+          }
+
+          function assertNoRemovedMetricNames(value, file) {
+            if (!value || typeof value !== "object") return;
+            for (const [key, child] of Object.entries(value)) {
+              if (removedNames.has(key) || (typeof child === "string" && removedNames.has(child))) {
+                throw new Error(`Removed metric name found in ${file}`);
+              }
+              assertNoRemovedMetricNames(child, file);
             }
           }
 
@@ -162,8 +183,7 @@ jobs:
               throw new Error(`Unverified promo universe was published: ${universe.id}`);
             }
             const file = publicPathToFile(universe.universeFile);
-            const expected = universe.id.startsWith("global-booster-") ? sealedMetrics : singlesMetrics;
-            assertMetrics(file, expected);
+            assertMetrics(file, priceMetrics);
           }
 
           for (const index of manifest.indexes) {
@@ -171,8 +191,7 @@ jobs:
               throw new Error(`manifest index has unexpected file: ${index.file}`);
             }
             const file = publicPathToFile(index.file);
-            const expected = index.id.startsWith("global-booster-") ? sealedMetrics : singlesMetrics;
-            assertMetrics(file, expected);
+            assertMetrics(file, priceMetrics);
           }
 
           for (const indicator of manifest.indicators) {
@@ -180,8 +199,7 @@ jobs:
               throw new Error(`manifest indicator has unexpected file: ${indicator.file}`);
             }
             const file = publicPathToFile(indicator.file);
-            const expected = indicator.id.startsWith("global-booster-") ? trendIndicatorMetrics : [...windowIndicatorMetrics, ...trendIndicatorMetrics];
-            assertMetrics(file, expected);
+            assertMetrics(file, trendIndicatorMetrics);
           }
 
           for (const name of fs.readdirSync(indexDir)) {

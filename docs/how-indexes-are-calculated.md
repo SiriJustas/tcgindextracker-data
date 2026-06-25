@@ -1,31 +1,24 @@
 # How Indexes Are Calculated
 
-TCG Index Tracker uses the real Cardmarket price fields available for each product type. It does not invent missing metrics, copy one metric into another, or fall back between metrics.
+TCG Index Tracker uses the real Cardmarket price fields that provide useful movement in the public files. It does not invent missing metrics, copy one metric into another, or fall back between metrics.
 
 ## Price Metrics
 
-Global Singles tracks:
-
-- `avg1` - AVG1, the average sale price over the last day.
-- `avg7` - AVG7, the average sale price over the last 7 days.
-- `avg30` - AVG30, the average sale price over the last 30 days.
-- `avg` - Avg. Sell Price, the average sell price shown in the Cardmarket website chart.
-- `low` - Low Price, the lowest price on the market.
-- `trend` - Trend Price, the trend price shown on the Cardmarket website.
-
-Booster Boxes and Booster Packs track:
+All current universes track:
 
 - `avg`
 - `low`
 - `trend`
 
-`avg` is its own Cardmarket field. It is not assumed to equal `avg1`, `avg7`, or `avg30`.
+`avg` is Avg. Sell Price, the average sell price shown in the Cardmarket website chart. `low` is the lowest price on the market. `trend` is the Cardmarket trend price.
+
+`avg1`, `avg7`, and `avg30` are intentionally not published by this project because the available public feed does not provide useful changing values for them.
 
 ## Product Inclusion
 
 For dynamic global universes, a product enters only when every configured metric for that universe is a valid positive number. Missing, zero, negative, or non-numeric values exclude the product until a future rebalance.
 
-For curated fixed set universes, each metric has its own active product set. A product missing `avg` can be excluded from the `avg` series while still participating in `avg1`, `avg7`, `avg30`, `low`, and `trend`.
+For curated fixed set universes, each metric has its own active product set. A product missing `avg` can be excluded from the `avg` series while still participating in `low` and `trend`.
 
 ## Equal Weight
 

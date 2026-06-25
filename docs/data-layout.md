@@ -15,6 +15,7 @@ Raw Cardmarket downloads are temporary and must not be committed.
 ## manifest.json
 
 `/data/pokemon/manifest.json` is the discovery file for Pokemon data.
+It is the only discovery manifest for Pokemon indexes, indicators, and universe files.
 
 Important fields:
 
@@ -25,6 +26,8 @@ Important fields:
 - `universes` - universe files
 - `universes[].universeFile` - path under `/data/pokemon/universes/`
 - `indicators` - generated market indicator history files
+
+Current Pokemon output contains 160 universes, 320 price index files, and 160 indicator files.
 
 ## summary.json
 
@@ -62,17 +65,7 @@ Important fields:
 
 Point shape follows each file's own `metrics` order.
 
-Singles:
-
-```json
-["2026-06-23",100,100,100,100,100,100]
-```
-
-```text
-[date, avg1Index, avg7Index, avg30Index, avgIndex, lowIndex, trendIndex]
-```
-
-Sealed:
+All current price indexes:
 
 ```json
 ["2026-06-23",100,100,100]
@@ -115,22 +108,8 @@ Entry shape:
 
 Set universe files are fixed reviewed membership files, not automatic `idExpansion` exports.
 
-Current curated set universe coverage includes these fixed Cardmarket product-ID universes:
+Current curated coverage spans many English Pokemon singles sets from early WOTC-era sets through modern Scarlet & Violet-era sets. Exact membership is defined by the universe JSON files themselves and discovered through `manifest.universes`.
 
-- `base-set-unlimited-singles-universe.json` - 102 products
-- `base-set-shadowless-singles-universe.json` - 103 products
-- `jungle-singles-universe.json` - 66 products
-- `fossil-singles-universe.json` - 63 products
-- `base-set-2-singles-universe.json` - 130 cards
-- `team-rocket-singles-universe.json` - 84 products
-- Gym Challenge, Gym Heroes, Neo Genesis, Neo Discovery, Southern Islands, Neo Revelation, Neo Destiny
-- Legendary Collection, Expedition, Aquapolis, Skyridge
-- EX Ruby & Sapphire through EX Power Keepers
-- POP Series 1 through POP Series 8
-- Diamond & Pearl, Mysterious Treasures, Secret Wonders, Great Encounters, Majestic Dawn, Legends Awakened, Stormfront
+Cardmarket expansion IDs can group several print variants together. Because the catalog does not expose a reliable variant field for every case, set universes are reviewed before publication instead of being treated as blind automatic exports.
 
-Cardmarket expansion IDs can group several print variants together. Because the catalog does not expose a reliable variant field for every case, curated set universes are reviewed before publication.
-
-For expansion-based universes, `curation.cardmarketProductCount` records the number of actual Cardmarket product rows published in the universe. We do not store external checklist counts in the data files because those counts can represent printed checklists, reverse-holo checklists, promos, or other variants differently from Cardmarket product rows.
-
-Nintendo Black Star Promo is not published yet. The current catalog candidates behave like broad promo buckets rather than a reliable 98-product Nintendo Black Star universe, so it is deferred until the product-ID mapping can be verified.
+Universe counts are Cardmarket product-row counts. They may differ from printed checklist counts, reverse-holo checklist counts, promos, or other collector checklist conventions.
