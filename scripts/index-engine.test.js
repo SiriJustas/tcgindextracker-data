@@ -15,6 +15,8 @@ import {
   buildRebalanceScale,
   buildScaledPoint,
   buildUniverseFile,
+  buildTop100SinglesUniverseFile,
+  buildTopSinglesUniverseFile,
   calculateTrendIndicators,
   createFixedUniverseSnapshot,
   createSnapshot,
@@ -152,6 +154,64 @@ describe("index engine", () => {
     expect(baseProducts).toEqual({ 1: { avg: 13, low: 8, trend: 11 } });
     expect(universeFile.metrics).toEqual(PRICE_METRICS);
     expect(universeFile.entries).toEqual({ 1: "Alpha" });
+  });
+
+  it("builds top singles universes from the full singles price guide", () => {
+    const topProductsPayload = {
+      createdAt: "2026-06-22T12:09:07+0200",
+      products: [
+        { idProduct: 1, idCategory: 51, name: "Alpha" },
+        { idProduct: 2, idCategory: 51, name: "Beta" },
+        { idProduct: 3, idCategory: 51, name: "Gamma" },
+        { idProduct: 4, idCategory: 51, name: "Delta" },
+        { idProduct: 5, idCategory: 52, name: "Booster Pack" },
+      ],
+    };
+    const customPriceGuide = {
+      createdAt: "2026-06-23T02:46:08+0200",
+      priceGuides: [
+        { idProduct: 1, avg: 10, low: 8, trend: 100 },
+        { idProduct: 2, avg: 30, low: 8, trend: 200 },
+        { idProduct: 3, avg: 20, low: 8, trend: 200 },
+        { idProduct: 4, avg: null, low: 8, trend: 500 },
+        { idProduct: 5, avg: 900, low: 8, trend: 900 },
+      ],
+    };
+
+    const top100 = buildTop100SinglesUniverseFile({ productsPayload: topProductsPayload, priceGuidePayload: customPriceGuide, updatedAt: "2026-06-23" });
+    const top2 = buildTopSinglesUniverseFile({ limit: 2, productsPayload: topProductsPayload, priceGuidePayload: customPriceGuide, updatedAt: "2026-06-23" });
+
+    expect(top100.id).toBe("top-100-singles-universe");
+    expect(top100.source).toMatchObject({
+      universeSource: "pokemon-singles-price-guide",
+      rankMetric: "trend",
+      productsCreatedAt: topProductsPayload.createdAt,
+      pricesCreatedAt: customPriceGuide.createdAt,
+    });
+    expect(top100.curation.status).toBe("generated-from-price-guide");
+    expect(top100.entries).toEqual({ 1: "Alpha", 2: "Beta", 3: "Gamma" });
+    expect(top2.id).toBe("top-2-singles-universe");
+    expect(top2.name).toBe("Top 2 Singles");
+    expect(top2.entries).toEqual({ 2: "Beta", 3: "Gamma" });
+  });
+
+  it("preserves top-100 membership when a rebuild is not requested", () => {
+    const previousUniverseFile = {
+      id: "top-100-singles-universe",
+      entries: { 9: "Existing" },
+      metrics: ["avg", "low", "trend"],
+    };
+    const top100 = buildTop100SinglesUniverseFile({
+      productsPayload: { products: [{ idProduct: 1, idCategory: 51, name: "Alpha" }] },
+      priceGuidePayload: { priceGuides: [{ idProduct: 1, avg: 10, low: 8, trend: 100 }] },
+      updatedAt: "2026-06-24",
+      previousUniverseFile,
+      shouldRebuild: false,
+    });
+
+    expect(top100.entries).toEqual({ 9: "Existing" });
+    expect(top100.updatedAt).toBe("2026-06-24");
+    expect(top100.count).toBe(1);
   });
 
   it("uses stored product names for universe files when active products are absent today", () => {

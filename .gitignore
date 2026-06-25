@@ -8,3 +8,5 @@ audit/
 *.gz
 node_modules/
 .DS_Store
+testdata/
+old-data/

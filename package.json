@@ -7,6 +7,7 @@
   "scripts": {
     "download:data": "node scripts/download-cardmarket-data.js",
     "generate:data": "node scripts/generate-data.js",
+    "generate:expansion-universes": "node scripts/generate-expansion-universes.js",
     "test": "vitest run scripts"
   },
   "devDependencies": {

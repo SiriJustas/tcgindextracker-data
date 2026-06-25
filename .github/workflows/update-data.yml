@@ -32,6 +32,8 @@ jobs:
           node --check scripts/check-price-guide-fresh.js
           node --check scripts/check-update-needed.js
           node --check scripts/download-cardmarket-data.js
+          node --check scripts/expansion-universe-engine.js
+          node --check scripts/generate-expansion-universes.js
           node --check scripts/generate-data.js
           node --check scripts/index-engine.js
           node --check scripts/update-checks.js

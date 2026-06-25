@@ -27,7 +27,7 @@ Important fields:
 - `universes[].universeFile` - path under `/data/pokemon/universes/`
 - `indicators` - generated market indicator history files
 
-Current Pokemon output contains 160 universes, 320 price index files, and 160 indicator files.
+Current Pokemon output contains 763 universes, 1,526 price index files, and 763 indicator files.
 
 ## summary.json
 
@@ -113,3 +113,5 @@ Current curated coverage spans many English Pokemon singles sets from early WOTC
 Cardmarket expansion IDs can group several print variants together. Because the catalog does not expose a reliable variant field for every case, set universes are reviewed before publication instead of being treated as blind automatic exports.
 
 Universe counts are Cardmarket product-row counts. They may differ from printed checklist counts, reverse-holo checklist counts, promos, or other collector checklist conventions.
+
+Custom universes such as `top-100-singles`, `top-250-singles`, `top-500-singles`, and `top-1000-singles` are generated from the full Pokemon singles product catalog joined to the Cardmarket price guide. They rank valid priced singles by `trend`, not by curated set membership.

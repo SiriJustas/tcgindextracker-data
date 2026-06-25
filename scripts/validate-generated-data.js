@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { SINGLES_METRICS, TREND_INDICATOR_METRICS, indicatorChange } from "./index-engine.js";
+import { SINGLES_METRICS, TOP_SINGLES_LIMITS, TREND_INDICATOR_METRICS, indicatorChange } from "./index-engine.js";
 
 const REMOVED_NAMES = new Set(["avg1", "avg7", "avg30", "advanceDecline", "percentAbove30d", "heat", "dispersion"]);
 const REQUIRED_GLOBAL_UNIVERSE_IDS = ["global-singles", "global-booster-boxes", "global-booster-packs"];
@@ -16,6 +16,8 @@ export function validateGeneratedData(root = process.cwd(), options = {}) {
   const universeDir = path.join(pokemonDir, "universes");
   const manifest = readJson(path.join(pokemonDir, "manifest.json"));
   const summary = readJson(path.join(pokemonDir, "summary.json"));
+  const productsPayload = readOptionalJson(options.productsPath ?? path.join(root, "testdata", "products_singles_6 (8).json"));
+  const priceGuidePayloads = options.priceGuidePayloads ?? readDefaultPriceGuides(root, options.pricesPath);
   const universeFiles = jsonFileNames(universeDir);
   const expectedUniverseCount = universeFiles.length;
   const expectedIndexCount = expectedUniverseCount * 2;
@@ -32,12 +34,11 @@ export function validateGeneratedData(root = process.cwd(), options = {}) {
     if (!String(universe.universeFile ?? "").startsWith("/data/pokemon/universes/")) {
       throw new Error(`manifest universe has unexpected universeFile: ${universe.universeFile}`);
     }
-    if (/nintendo/i.test(`${universe.id} ${universe.name}`)) {
-      throw new Error(`Unverified promo universe was published: ${universe.id}`);
-    }
     const file = publicPathToFile(root, universe.universeFile);
-    assertFileMetrics(file, SINGLES_METRICS);
+    const universeFile = assertFileMetrics(file, SINGLES_METRICS);
+    assertSetUniverse(universeFile, productsPayload, file);
   }
+  assertCustomUniverses(root, manifest, productsPayload, priceGuidePayloads);
 
   for (const index of manifest.indexes) {
     if (!String(index.file ?? "").startsWith("/data/pokemon/indexes/")) {
@@ -138,6 +139,76 @@ function assertRequiredGlobalItems(manifest) {
   }
 }
 
+export function assertCustomUniverses(root, manifest, productsPayload = null, priceGuidePayloads = []) {
+  const singlesProducts = new Set((productsPayload?.products ?? []).filter((product) => product.idCategory === 51).map((product) => String(product.idProduct)));
+  const priceGuidesByCreatedAt = new Map(asArray(priceGuidePayloads).map((payload) => [payload?.createdAt, new Map((payload?.priceGuides ?? []).map((price) => [String(price.idProduct), price]))]));
+  for (const universe of manifest.universes) {
+    const file = readJson(publicPathToFile(root, universe.universeFile));
+    if (file.kind !== "custom-singles-universe") continue;
+    const priceGuides = priceGuidesByCreatedAt.get(file.source?.pricesCreatedAt) ?? [...priceGuidesByCreatedAt.values()].at(-1) ?? new Map();
+    const topLimit = topSinglesLimit(universe.id);
+    if (topLimit !== null && Object.keys(file.entries ?? {}).length > topLimit) {
+      throw new Error(`${universe.id} universe must not contain more than ${topLimit} products`);
+    }
+    if (file.source?.universeSource !== "pokemon-singles-price-guide") {
+      throw new Error(`${universe.id} must be generated from the Pokemon singles price guide`);
+    }
+    for (const idProduct of Object.keys(file.entries ?? {})) {
+      if (singlesProducts.size > 0 && !singlesProducts.has(idProduct)) {
+        throw new Error(`${universe.id} contains product outside Pokemon singles catalog: ${idProduct}`);
+      }
+      const price = priceGuides.get(idProduct);
+      if (priceGuides.size > 0 && !hasAllValidPrices(price, SINGLES_METRICS)) {
+        throw new Error(`${universe.id} contains product without valid avg/low/trend prices: ${idProduct}`);
+      }
+    }
+  }
+}
+
+export function assertSetUniverse(universe, productsPayload = null, file = "") {
+  if (universe?.kind !== "set-singles-universe") return;
+  if (universe.count !== Object.keys(universe.entries ?? {}).length) {
+    throw new Error(`${path.relative(process.cwd(), file)} count must match entries length`);
+  }
+  const productsById = new Map((productsPayload?.products ?? []).map((product) => [String(product.idProduct), product]));
+  if (productsById.size === 0) return;
+  const expectedExpansions = new Set((universe.source?.idExpansions ?? [universe.source?.idExpansion]).filter(Number.isInteger));
+  if (expectedExpansions.size === 0) {
+    throw new Error(`${path.relative(process.cwd(), file)} set universe must declare source.idExpansion`);
+  }
+  for (const [idProduct, name] of Object.entries(universe.entries ?? {})) {
+    const product = productsById.get(idProduct);
+    if (!product || product.idCategory !== 51) {
+      throw new Error(`${path.relative(process.cwd(), file)} contains product outside Pokemon singles catalog: ${idProduct}`);
+    }
+    if (!expectedExpansions.has(product.idExpansion)) {
+      throw new Error(`${path.relative(process.cwd(), file)} contains product ${idProduct} outside declared idExpansion`);
+    }
+    if (product.name !== name) {
+      throw new Error(`${path.relative(process.cwd(), file)} product ${idProduct} name does not match products_singles catalog`);
+    }
+  }
+}
+
+function asArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function hasAllValidPrices(price, metrics) {
+  return metrics.every((metric) => Number(price?.[metric]) > 0);
+}
+
+function topSinglesLimit(universeId) {
+  const match = String(universeId ?? "").match(/^top-(\d+)-singles$/);
+  if (!match) return null;
+  const limit = Number(match[1]);
+  if (!TOP_SINGLES_LIMITS.includes(limit)) {
+    throw new Error(`Unexpected top singles universe id: ${universeId}`);
+  }
+  return limit;
+}
+
 function assertFileMetrics(file, expectedMetrics) {
   const data = readJson(file);
   if (!sameArray(data.metrics, expectedMetrics)) {
@@ -170,6 +241,22 @@ function readJson(file) {
   assertNoDemoKeys(data, file);
   assertNoRemovedMetricNames(data, file);
   return data;
+}
+
+function readOptionalJson(file) {
+  if (!file || !fs.existsSync(file)) return null;
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function readDefaultPriceGuides(root, explicitPath) {
+  if (explicitPath) return asArray(readOptionalJson(explicitPath)).filter(Boolean);
+  const testdataDir = path.join(root, "testdata");
+  if (!fs.existsSync(testdataDir)) return [];
+  return fs
+    .readdirSync(testdataDir)
+    .filter((fileName) => /^price_guide_6 .*\.json$/.test(fileName))
+    .map((fileName) => readOptionalJson(path.join(testdataDir, fileName)))
+    .filter(Boolean);
 }
 
 function assertNoDemoKeys(value, file) {

@@ -20,14 +20,15 @@ The Pokemon dataset currently includes:
 - global booster box indexes
 - global booster pack indexes
 - curated Pokemon set singles indexes
+- custom Top-N singles indexes built from the full Pokemon singles price guide
 - market indicators for every published universe
 - universe files for membership and audit data
 
 Current generated scale:
 
-- 160 universes
-- 320 price indexes
-- 160 market indicator files
+- 763 universes
+- 1,526 price indexes
+- 763 market indicator files
 
 Future TCGs can use the same layout:
 

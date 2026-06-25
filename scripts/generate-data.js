@@ -4,6 +4,7 @@ import {
   INDEX_DEFINITIONS,
   PRODUCT_UNIVERSES,
   SINGLES_METRICS,
+  TOP_SINGLES_LIMITS,
   activeProductsByMetric,
   assertFreshPriceGuide,
   auditPokemonProducts,
@@ -25,6 +26,7 @@ import {
   percentChange,
   shouldRebalanceUniverse,
   summarizeRebalance,
+  buildTopSinglesUniverseFile,
   universeFilePath,
   upsertPoint,
 } from "./index-engine.js";
@@ -105,8 +107,10 @@ for (const setUniverse of setUniverseFiles) {
     setUniverse.metrics = SINGLES_METRICS;
   }
 }
-const setIndexDefinitions = setUniverseFiles.flatMap((setUniverse) => buildSetIndexDefinitions(setUniverse));
-const setIndicatorDefinitions = setUniverseFiles.map((setUniverse) => buildSetIndicatorDefinition(setUniverse));
+const customUniverseFiles = await writeCustomUniverseFiles({ universesDir, productsPayload, priceGuidePayload, previousUniverses, valuationDate });
+const indexedUniverseFiles = [...setUniverseFiles, ...customUniverseFiles].sort(compareUniverseFiles);
+const setIndexDefinitions = indexedUniverseFiles.flatMap((setUniverse) => buildSetIndexDefinitions(setUniverse));
+const setIndicatorDefinitions = indexedUniverseFiles.map((setUniverse) => buildSetIndicatorDefinition(setUniverse));
 const setIndexIds = new Set(setIndexDefinitions.map((definition) => definition.id));
 const setIndicatorIds = new Set(setIndicatorDefinitions.map((definition) => definition.id));
 manifest.indexes = (manifest.indexes ?? []).filter((index) => !setIndexIds.has(index.id));
@@ -320,7 +324,7 @@ if (!setsOnly) for (const universe of PRODUCT_UNIVERSES) {
   });
 }
 
-for (const setUniverse of setUniverseFiles) {
+for (const setUniverse of indexedUniverseFiles) {
   const universe = setUniverseToProductUniverse(setUniverse);
   const rows = fixedSetRows(setUniverse, priceGuidePayload);
   const previousUniverseState = previousUniverses[universe.id] ?? { products: {}, productMeta: {}, baseProducts: {} };
@@ -458,7 +462,7 @@ manifest.indexes.push(...setIndexDefinitions.map(({ id, name, file, description,
 manifest.indicators.push(...setIndicatorDefinitions);
 manifest.universes = buildManifestUniverses({
   existingManifest,
-  setUniverseFiles,
+  setUniverseFiles: indexedUniverseFiles,
   universeSnapshots,
   setsOnly,
   tcg,
@@ -556,6 +560,16 @@ async function readSetUniverseFiles(universesDir) {
 }
 
 function setUniverseToProductUniverse(setUniverse) {
+  if (setUniverse.kind === "custom-singles-universe") {
+    return {
+      id: setUniverse.slug,
+      name: setUniverse.name,
+      metrics: SINGLES_METRICS,
+      rebalancePolicy: isTopSinglesSlug(setUniverse.slug) ? "monthly-chain-linked" : "fixed-curated",
+      universeFile: `/data/pokemon/universes/${setUniverse.id}.json`,
+    };
+  }
+
   return {
     id: `${setUniverse.slug}-singles`,
     name: `${setUniverse.name} Singles`,
@@ -642,6 +656,48 @@ function fixedSetRows(setUniverse, priceGuidePayload) {
     },
     price: pricesByProduct.get(idProduct),
   }));
+}
+
+async function writeCustomUniverseFiles({ universesDir, productsPayload, priceGuidePayload, previousUniverses, valuationDate }) {
+  const topUniverses = [];
+  for (const limit of TOP_SINGLES_LIMITS) {
+    const universeId = `top-${limit}-singles`;
+    const previousTopUniverse = await readOptionalJson(path.join(universesDir, `${universeId}-universe.json`), null);
+    const topUniverse = buildTopSinglesUniverseFile({
+      limit,
+      productsPayload,
+      priceGuidePayload,
+      updatedAt: valuationDate,
+      previousUniverseFile: previousTopUniverse,
+      shouldRebuild: shouldRebalanceCustomUniverse(universeId, previousUniverses[universeId], valuationDate) || !previousTopUniverse,
+    });
+    await writeCompactJson(path.join(universesDir, `${topUniverse.id}.json`), topUniverse);
+    topUniverses.push(topUniverse);
+  }
+
+  return topUniverses.sort(compareUniverseFiles);
+}
+
+function shouldRebalanceCustomUniverse(universeId, previousUniverseState, valuationDate) {
+  if (!previousUniverseState) return true;
+  return shouldRebalanceUniverse(
+    {
+      id: universeId,
+      metrics: SINGLES_METRICS,
+      rebalancePolicy: "monthly-chain-linked",
+    },
+    previousUniverseState,
+    valuationDate,
+  );
+}
+
+function isTopSinglesSlug(slug) {
+  return /^top-\d+-singles$/.test(String(slug ?? ""));
+}
+
+function compareUniverseFiles(left, right) {
+  const byName = String(left.name ?? "").localeCompare(String(right.name ?? ""));
+  return byName || String(left.slug ?? left.id).localeCompare(String(right.slug ?? right.id));
 }
 
 function hasAnyMetricBaseProducts(baseProducts, metrics) {

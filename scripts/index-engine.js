@@ -13,6 +13,9 @@ export const TREND_INDICATOR_METRICS = [
   "weakFloorPercent",
 ];
 
+export const CUSTOM_UNIVERSE_KIND = "custom-singles-universe";
+export const TOP_SINGLES_LIMITS = [100, 250, 500, 1000];
+
 export const PRODUCT_UNIVERSES = [
   {
     id: "global-singles",
@@ -113,6 +116,76 @@ export function buildUniverseFile({ universe, updatedAt, baseDate, rows, basePro
     count: sortedProducts.length,
     entries,
   };
+}
+
+export function buildTopSinglesUniverseFile({ limit, productsPayload, priceGuidePayload, updatedAt, previousUniverseFile = null, shouldRebuild = true }) {
+  const numericLimit = Number(limit);
+  if (!Number.isInteger(numericLimit) || numericLimit <= 0) {
+    throw new Error(`Invalid top singles universe limit: ${limit}`);
+  }
+
+  if (!shouldRebuild && previousUniverseFile?.entries && typeof previousUniverseFile.entries === "object") {
+    return {
+      ...previousUniverseFile,
+      updatedAt,
+      count: Object.keys(previousUniverseFile.entries).length,
+      metrics: SINGLES_METRICS,
+    };
+  }
+
+  const priceGuides = Array.isArray(priceGuidePayload?.priceGuides) ? priceGuidePayload.priceGuides : [];
+  const pricesByProduct = new Map(priceGuides.map((price) => [String(price.idProduct), price]));
+  const products = Array.isArray(productsPayload?.products) ? productsPayload.products : [];
+  const candidates = products
+    .filter((product) => product.idCategory === 51)
+    .map((product) => ({
+      idProduct: String(product.idProduct),
+      numericId: Number(product.idProduct),
+      name: product.name,
+      price: pricesByProduct.get(String(product.idProduct)),
+    }))
+    .filter(({ price }) => hasAllMetricPrices(price, SINGLES_METRICS))
+    .sort((left, right) => {
+      const byTrend = readPrice(right.price.trend) - readPrice(left.price.trend);
+      if (byTrend) return byTrend;
+      const byAvg = readPrice(right.price.avg) - readPrice(left.price.avg);
+      return byAvg || left.numericId - right.numericId;
+    })
+    .slice(0, numericLimit);
+  const entries = sortedEntryMap(Object.fromEntries(candidates.map((product) => [product.idProduct, product.name])));
+  const id = `top-${numericLimit}-singles`;
+
+  return {
+    id: `${id}-universe`,
+    tcg: "pokemon",
+    kind: CUSTOM_UNIVERSE_KIND,
+    name: `Top ${numericLimit} Singles`,
+    slug: id,
+    source: {
+      universeSource: "pokemon-singles-price-guide",
+      rankMetric: "trend",
+      productsCreatedAt: productsPayload?.createdAt ?? null,
+      pricesCreatedAt: priceGuidePayload?.createdAt ?? null,
+    },
+    curation: { status: "generated-from-price-guide" },
+    metrics: SINGLES_METRICS,
+    updatedAt,
+    count: Object.keys(entries).length,
+    entries,
+  };
+}
+
+export function buildTop100SinglesUniverseFile(options) {
+  return buildTopSinglesUniverseFile({ ...options, limit: 100 });
+}
+
+function sortedEntryMap(entries) {
+  return Object.fromEntries(
+    Object.entries(entries)
+      .map(([idProduct, name]) => ({ idProduct, numericId: Number(idProduct), name }))
+      .sort((left, right) => left.name.localeCompare(right.name) || left.numericId - right.numericId)
+      .map(({ idProduct, name }) => [idProduct, name]),
+  );
 }
 
 export function parseValuationDate(createdAt) {

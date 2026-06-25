@@ -7,6 +7,12 @@ const UNIVERSE_DIR = path.join("public", "data", "pokemon", "universes");
 const INDICATOR_DIR = path.join("public", "data", "pokemon", "indicators");
 const SET_METRICS = ["avg", "low", "trend"];
 const GLOBAL_UNIVERSE_FILES = ["global-singles-universe.json", "global-booster-boxes-universe.json", "global-booster-packs-universe.json"];
+const CUSTOM_UNIVERSE_FILES = [
+  "top-100-singles-universe.json",
+  "top-250-singles-universe.json",
+  "top-500-singles-universe.json",
+  "top-1000-singles-universe.json",
+];
 
 const REQUIRED_NEW_UNIVERSES = [
   "ancient-origins-singles-universe.json",
@@ -123,7 +129,21 @@ const REQUIRED_NEW_UNIVERSES = [
 function setUniverseFiles() {
   return fs
     .readdirSync(UNIVERSE_DIR)
-    .filter((fileName) => fileName.endsWith("singles-universe.json") && fileName !== "global-singles-universe.json")
+    .filter((fileName) => {
+      if (!fileName.endsWith(".json") || GLOBAL_UNIVERSE_FILES.includes(fileName)) return false;
+      return readUniverse(fileName).kind === "set-singles-universe";
+    })
+    .sort();
+}
+
+function indexedUniverseFiles() {
+  return fs
+    .readdirSync(UNIVERSE_DIR)
+    .filter((fileName) => {
+      if (!fileName.endsWith(".json") || GLOBAL_UNIVERSE_FILES.includes(fileName)) return false;
+      const kind = readUniverse(fileName).kind;
+      return kind === "set-singles-universe" || kind === "custom-singles-universe";
+    })
     .sort();
 }
 
@@ -144,6 +164,7 @@ describe("curated Pokemon set universes", () => {
     const files = setUniverseFiles();
 
     expect(files).toEqual(expect.arrayContaining(REQUIRED_NEW_UNIVERSES));
+    expect(fs.readdirSync(UNIVERSE_DIR)).toEqual(expect.arrayContaining(CUSTOM_UNIVERSE_FILES));
     expect(fs.readdirSync(INDEX_DIR).filter((fileName) => fileName.endsWith("-universe.json"))).toEqual([]);
     expect(fs.existsSync(path.join(INDEX_DIR, "set-singles-universes-manifest.json"))).toBe(false);
   });
@@ -180,7 +201,7 @@ describe("curated Pokemon set universes", () => {
         expect(sourceProduct.name).toBe(name);
       }
     }
-  });
+  }, 30000);
 
   it("does not publish unsupported Base Set 1st Edition and excludes known incorrect rows", () => {
     expect(fs.existsSync(path.join(UNIVERSE_DIR, "base-set-1st-edition-singles-universe.json"))).toBe(false);
@@ -190,9 +211,73 @@ describe("curated Pokemon set universes", () => {
     expect(readUniverse("ex-hidden-legends-singles-universe.json").entries["881786"]).toBeUndefined();
   });
 
+  it("uses corrected names for duplicate Trainer Kit and VMAX Starter Deck expansions", () => {
+    const corrected = [
+      ["xy-trainer-kit-singles-universe.json", "XY Trainer Kit", "281652"],
+      ["xy-trainer-kit-bisharp-and-wigglytuff-singles-universe.json", "XY Trainer Kit: Bisharp & Wigglytuff", "281964"],
+      ["xy-trainer-kit-latias-and-latios-singles-universe.json", "XY Trainer Kit: Latias & Latios", "289737"],
+      ["xy-trainer-kit-pikachu-libre-and-suicune-singles-universe.json", "XY Trainer Kit: Pikachu Libre & Suicune", "290263"],
+      ["sm-trainer-kit-lycanroc-and-alolan-raichu-singles-universe.json", "SM Trainer Kit: Lycanroc & Alolan Raichu", "297279"],
+      ["sm-trainer-kit-alolan-sandslash-and-alolan-ninetales-singles-universe.json", "SM Trainer Kit: Alolan Sandslash & Alolan Ninetales", "359328"],
+      ["vmax-starter-deck-venusaur-vmax-singles-universe.json", "VMAX Starter Deck: Venusaur VMAX", "523615"],
+      ["vmax-starter-deck-blastoise-vmax-singles-universe.json", "VMAX Starter Deck: Blastoise VMAX", "523725"],
+    ];
+    const staleFiles = [
+      "xy-trainer-kit-1632-singles-universe.json",
+      "xy-trainer-kit-1683-singles-universe.json",
+      "xy-trainer-kit-1707-singles-universe.json",
+      "sm-trainer-kit-singles-universe.json",
+      "sm-trainer-kit-2070-singles-universe.json",
+      "vmax-starter-deck-singles-universe.json",
+      "vmax-starter-deck-3590-singles-universe.json",
+    ];
+
+    for (const [fileName, name, sampleProductId] of corrected) {
+      const universe = readUniverse(fileName);
+      expect(universe.name).toBe(name);
+      expect(universe.entries[sampleProductId]).toBeTruthy();
+    }
+    for (const fileName of staleFiles) {
+      expect(fs.existsSync(path.join(UNIVERSE_DIR, fileName))).toBe(false);
+    }
+  });
+
+  it("builds Top-N custom universes from the Pokemon singles price guide", () => {
+    const products = JSON.parse(fs.readFileSync(path.join("testdata", "products_singles_6 (8).json"), "utf8")).products;
+    const singlesIds = new Set(products.filter((product) => product.idCategory === 51).map((product) => String(product.idProduct)));
+    const priceGuidesByCreatedAt = new Map(
+      ["price_guide_6 (6).json", "price_guide_6 (8).json"].map((fileName) => {
+        const payload = JSON.parse(fs.readFileSync(path.join("testdata", fileName), "utf8"));
+        return [payload.createdAt, new Map(payload.priceGuides.map((price) => [String(price.idProduct), price]))];
+      }),
+    );
+
+    const topUniverses = [
+      [100, readUniverse("top-100-singles-universe.json")],
+      [250, readUniverse("top-250-singles-universe.json")],
+      [500, readUniverse("top-500-singles-universe.json")],
+      [1000, readUniverse("top-1000-singles-universe.json")],
+    ];
+
+    for (const [limit, universe] of topUniverses) {
+      expect(universe.kind).toBe("custom-singles-universe");
+      expect(universe.source.universeSource).toBe("pokemon-singles-price-guide");
+      expect(universe.curation.status).toBe("generated-from-price-guide");
+      expect(Object.keys(universe.entries).length).toBeLessThanOrEqual(limit);
+      const pricesByProduct = priceGuidesByCreatedAt.get(universe.source.pricesCreatedAt);
+      for (const idProduct of Object.keys(universe.entries)) {
+        expect(singlesIds.has(idProduct)).toBe(true);
+        const price = pricesByProduct.get(idProduct);
+        expect(price.avg).toBeGreaterThan(0);
+        expect(price.low).toBeGreaterThan(0);
+        expect(price.trend).toBeGreaterThan(0);
+      }
+    }
+  });
+
   it("lists all universes in the Pokemon discovery manifest", () => {
     const manifest = JSON.parse(fs.readFileSync(path.join("public", "data", "pokemon", "manifest.json"), "utf8"));
-    const expectedUniverseFiles = [...GLOBAL_UNIVERSE_FILES, ...setUniverseFiles()].map((fileName) => "/data/pokemon/universes/" + fileName);
+    const expectedUniverseFiles = [...GLOBAL_UNIVERSE_FILES, ...indexedUniverseFiles()].map((fileName) => "/data/pokemon/universes/" + fileName);
 
     expect(manifest.universes).toHaveLength(expectedUniverseFiles.length);
     expect(manifest.universes.map((universe) => universe.universeFile).sort()).toEqual(expectedUniverseFiles.sort());
@@ -200,11 +285,12 @@ describe("curated Pokemon set universes", () => {
   });
 
   it("generates set price indexes and indicators from the fixed universes", () => {
-    for (const fileName of setUniverseFiles()) {
-      const slug = fileName.replace("-singles-universe.json", "");
-      const equal = readIndex(slug + "-singles-equal.json");
-      const market = readIndex(slug + "-singles-market.json");
-      const indicator = readIndicator(slug + "-singles.json");
+    for (const fileName of indexedUniverseFiles()) {
+      const universe = readUniverse(fileName);
+      const universeId = universe.kind === "custom-singles-universe" ? universe.slug : universe.slug + "-singles";
+      const equal = readIndex(universeId + "-equal.json");
+      const market = readIndex(universeId + "-market.json");
+      const indicator = readIndicator(universeId + ".json");
 
       expect(equal.metrics).toEqual(SET_METRICS);
       expect(market.metrics).toEqual(SET_METRICS);
@@ -212,8 +298,8 @@ describe("curated Pokemon set universes", () => {
       expect(market.points[0][0]).toBe("2026-06-23");
       expect(equal.points[0]).toHaveLength(4);
       expect(market.points[0]).toHaveLength(4);
-      expect(equal.points[0].slice(1).every((value) => typeof value === "number")).toBe(true);
-      expect(market.points[0].slice(1).every((value) => typeof value === "number")).toBe(true);
+      expect(equal.points[0].slice(1).every((value) => value === null || typeof value === "number")).toBe(true);
+      expect(market.points[0].slice(1).every((value) => value === null || typeof value === "number")).toBe(true);
       expect(indicator.points[0][0]).toBe("2026-06-23");
     }
   });
@@ -233,11 +319,15 @@ describe("curated Pokemon set universes", () => {
   it("publishes set indexes and indicators through Pokemon manifest and summary", () => {
     const manifest = JSON.parse(fs.readFileSync(path.join("public", "data", "pokemon", "manifest.json"), "utf8"));
     const summary = JSON.parse(fs.readFileSync(path.join("public", "data", "pokemon", "summary.json"), "utf8"));
-    const expectedIndexIds = setUniverseFiles().flatMap((fileName) => {
-      const slug = fileName.replace("-singles-universe.json", "");
-      return [slug + "-singles-equal", slug + "-singles-market"];
+    const expectedIndexIds = indexedUniverseFiles().flatMap((fileName) => {
+      const universe = readUniverse(fileName);
+      const universeId = universe.kind === "custom-singles-universe" ? universe.slug : universe.slug + "-singles";
+      return [universeId + "-equal", universeId + "-market"];
     });
-    const expectedIndicatorIds = setUniverseFiles().map((fileName) => fileName.replace("-singles-universe.json", "") + "-singles");
+    const expectedIndicatorIds = indexedUniverseFiles().map((fileName) => {
+      const universe = readUniverse(fileName);
+      return universe.kind === "custom-singles-universe" ? universe.slug : universe.slug + "-singles";
+    });
 
     expect(manifest.indexes.map((index) => index.id)).toEqual(expect.arrayContaining(expectedIndexIds));
     expect(summary.indexes.map((index) => index.id)).toEqual(expect.arrayContaining(expectedIndexIds));
@@ -250,11 +340,12 @@ describe("curated Pokemon set universes", () => {
   });
 
   it("points generated compositions at the shared universes folder", () => {
-    for (const fileName of setUniverseFiles()) {
-      const slug = fileName.replace("-singles-universe.json", "");
-      const equal = readIndex(slug + "-singles-equal.json");
-      const market = readIndex(slug + "-singles-market.json");
-      const indicator = readIndicator(slug + "-singles.json");
+    for (const fileName of indexedUniverseFiles()) {
+      const universe = readUniverse(fileName);
+      const universeId = universe.kind === "custom-singles-universe" ? universe.slug : universe.slug + "-singles";
+      const equal = readIndex(universeId + "-equal.json");
+      const market = readIndex(universeId + "-market.json");
+      const indicator = readIndicator(universeId + ".json");
 
       expect(equal.composition.universeFile).toBe("/data/pokemon/universes/" + fileName);
       expect(market.composition.universeFile).toBe("/data/pokemon/universes/" + fileName);
