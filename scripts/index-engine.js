@@ -176,7 +176,6 @@ export function auditPokemonProducts(productsPayload, universe) {
     candidateProducts: candidates.length,
     includedProducts: included.length,
     rejectedProducts: rejected.length,
-    includedNames: included.map((product) => product.name).sort((a, b) => a.localeCompare(b)),
     rejectedSample: rejected.slice(0, 12).map((product) => ({
       idProduct: product.idProduct,
       name: product.name,

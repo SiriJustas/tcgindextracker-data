@@ -198,12 +198,6 @@ if (!setsOnly) for (const universe of PRODUCT_UNIVERSES) {
   console.log(
     `${universe.name}: included ${audit.includedProducts}/${audit.candidateProducts} category products, rejected ${audit.rejectedProducts}, priced ${rows.length}`,
   );
-  if (universe.id === "global-booster-boxes") {
-    console.log("Included Booster Boxes / Displays / Bundles / Sleeved Booster Cases:");
-    for (const name of audit.includedNames) {
-      console.log(`- ${name}`);
-    }
-  }
 }
 
 if (!setsOnly) for (const universe of PRODUCT_UNIVERSES) {
