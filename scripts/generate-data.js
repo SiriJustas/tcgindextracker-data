@@ -17,6 +17,7 @@ import {
   ensureBaseState,
   buildRebalanceScale,
   buildScaledPoint,
+  indicatorChange,
   indicatorMetricsForUniverse,
   joinPokemonProducts,
   normalizeScaleByMethodMetric,
@@ -319,9 +320,9 @@ if (!setsOnly) for (const universe of PRODUCT_UNIVERSES) {
     file: `/data/pokemon/indicators/${universe.id}.json`,
     metrics: indicatorFile.metrics,
     latest: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, latestIndicator?.[index + 1] ?? null])),
-    change1d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 1)])),
-    change7d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 7)])),
-    change30d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 30)])),
+    change1d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, indicatorChange(indicatorFile.points, metric, index + 1, 1)])),
+    change7d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, indicatorChange(indicatorFile.points, metric, index + 1, 7)])),
+    change30d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, indicatorChange(indicatorFile.points, metric, index + 1, 30)])),
   });
 }
 
@@ -453,9 +454,9 @@ for (const setUniverse of setUniverseFiles) {
     file: `/data/pokemon/indicators/${universe.id}.json`,
     metrics: indicatorFile.metrics,
     latest: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, latestIndicator?.[index + 1] ?? null])),
-    change1d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 1)])),
-    change7d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 7)])),
-    change30d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, percentChange(indicatorFile.points, index + 1, 30)])),
+    change1d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, indicatorChange(indicatorFile.points, metric, index + 1, 1)])),
+    change7d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, indicatorChange(indicatorFile.points, metric, index + 1, 7)])),
+    change30d: Object.fromEntries(indicatorFile.metrics.map((metric, index) => [metric, indicatorChange(indicatorFile.points, metric, index + 1, 30)])),
   });
 }
 

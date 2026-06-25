@@ -781,8 +781,25 @@ export function percentChange(points, metricIndex, days) {
   return roundIndex(((latest - prior) / prior) * 100);
 }
 
+export function indicatorChange(points, metric, metricIndex, days) {
+  if (metric === "netTrendBreadth") return pointChange(points, metricIndex, days);
+  return percentChange(points, metricIndex, days);
+}
+
+export function pointChange(points, metricIndex, days) {
+  if (points.length < 2) return null;
+  const latest = readNumber(points.at(-1)?.[metricIndex]);
+  const prior = readNumber(points.at(-(days + 1))?.[metricIndex]);
+  if (latest === null || prior === null) return null;
+  return roundIndex(latest - prior);
+}
+
 function readNonNegativeNumber(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function readNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 export function roundIndex(value) {

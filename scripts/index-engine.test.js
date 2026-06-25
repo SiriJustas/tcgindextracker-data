@@ -19,6 +19,7 @@ import {
   createFixedUniverseSnapshot,
   createSnapshot,
   ensureBaseState,
+  indicatorChange,
   indicatorMetricsForUniverse,
   isBoosterBoxDisplay,
   isBoosterPack,
@@ -27,6 +28,7 @@ import {
   normalizePriceHistory,
   parseValuationDate,
   percentChange,
+  pointChange,
   shouldRebalanceUniverse,
   summarizeRebalance,
   universeFilePath,
@@ -268,6 +270,17 @@ describe("index engine", () => {
       ["2026-06-23", 102, 104, 106],
     ]);
     expect(percentChange(points, 1, 1)).toBe(2);
+  });
+
+  it("calculates point changes for negative indicator metrics", () => {
+    const points = [
+      ["2026-06-23", -5.41, 40],
+      ["2026-06-24", -5.04, 42],
+    ];
+
+    expect(pointChange(points, 1, 1)).toBe(0.37);
+    expect(indicatorChange(points, "netTrendBreadth", 1, 1)).toBe(0.37);
+    expect(indicatorChange(points, "percentAboveTrend", 2, 1)).toBe(5);
   });
 
   it("builds indicators only from avg, low, and trend", () => {
